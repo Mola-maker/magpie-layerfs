@@ -97,7 +97,10 @@ defaults here are set for that room, not for a private library:
   directory, the credential stores (`~/.ssh`, `~/.aws`, `~/.gnupg`),
   the home directory, the filesystem root, and the plugin's own store
   are refused as a source — as the source, inside it, or containing
-  it.
+  it. The comparison runs on real paths (`realpathSync`, case-folded),
+  so neither a symlink pointing at a refused directory nor a
+  case-variant spelling of one (`~/.Config/Magpie`, `~/.AWS`) gets
+  past it.
 - **Secret-shaped files never enter the store from an import**:
   `.git`, `.env*`, private keys (`id_rsa`, `id_ed25519`, `*.pem`,
   `*.key`, …), `.ssh`, `.aws`. The sim backend skips them and reports
@@ -139,8 +142,8 @@ parallel agents, each keeping 3 checkpoints (sim backend, this machine):
 | resolve a file path | walk the copy's tree | **138 µs**, with its checkpoint + SHA-256 |
 | total disk for the run | 643.5 MB | **188.1 MB** (store + the 6 live workspaces) |
 
-![test run](https://raw.githubusercontent.com/Mola-maker/magpie-layerfs/main/docs/assets/tests.png)
-![benchmark](https://raw.githubusercontent.com/Mola-maker/magpie-layerfs/main/docs/assets/benchmark.png)
+![test run](https://raw.githubusercontent.com/Mola-maker/magpie-layerfs/29b52fb98fc2e9c20fb9e5c3c85a05f80cd01754/docs/assets/tests.png)
+![benchmark](https://raw.githubusercontent.com/Mola-maker/magpie-layerfs/29b52fb98fc2e9c20fb9e5c3c85a05f80cd01754/docs/assets/benchmark.png)
 
 Honest limits: a first provision still materializes the tree once, and the
 sim backend rehashes the tree at each checkpoint (the native engine tracks
@@ -195,12 +198,15 @@ fetch, and the bridge's reads are a fixed host list (`usage:summary`,
 through. So the page animates the sample bundled with it —
 `page/trajectory.js`, a labeled recording from the benchmark scenario
 (one project, six agents, three checkpoints each), a package asset
-that nothing rewrites at runtime. The live recording is kept where
-plugin data belongs, in the store: after each tool call the backend
-refreshes `trajectory.json` under `MAGPIE_LAYERFS_HOME` (scoped to the
-project the call touched), and the tools' own results carry the same
-state. The page declares no `magpie.read` permissions, and its test
-asserts it asks for none.
+that nothing rewrites at runtime. The trajectory itself is computed
+on demand from the store's records whenever it is asked for
+(`backend.trajectory()`; `tools/gen-trajectory.mjs` uses it to make
+the sample). No recording file is maintained per tool call: an
+earlier version refreshed one in the store after every call, which
+cost a branch-chain walk per call — growing with the project's
+history — for a file the page cannot read, so the refresh was
+removed in 0.7.1. The page declares no `magpie.read` permissions,
+and its test asserts it asks for none.
 
 ## Develop
 
@@ -219,6 +225,59 @@ MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<layerfs checkout>/sdk/js/src/inde
 
 Zero runtime dependencies; the arguments are JSON Schema, like the other
 tools packages. MIT.
+
+## Changes in 0.7.1
+
+The second round of the PR #318 review — the holes it found in
+0.7.0's own new code, plus its smaller items:
+
+- **The source guard compares real paths now.** 0.7.0 compared
+  `resolve()`d strings, which a symlink to a refused directory — or
+  a case-variant spelling of one on a case-insensitive volume —
+  walked straight past (the review imported `plugin-auth.json`
+  through `~/.Config/Magpie` and through a symlink). Both sides are
+  canonicalized with `realpathSync` and case-folded; refused roots
+  that do not exist are canonicalized through their nearest existing
+  ancestor. Regression tests cover the symlink and the case variant,
+  unit-level and end to end.
+- **Breaking on-disk change: workspaces moved, branch encoding
+  widened.** Workspaces now live at `workspaces/<project>/<encoded
+  branch>` — the flat `<project>--<branch>` name was not injective
+  (project `a` branch `b--c` and project `a--b` branch `c` shared one
+  directory, and a checkpoint crossed the projects). The branch
+  encoder now percent-encodes every character outside `[a-z0-9._-]`,
+  uppercase included, so `Main` and `main` no longer share a head
+  file or a workspace on case-insensitive volumes either. Stores are
+  **not migrated**: branch head files are unchanged for names the old
+  encoder already spelled the same way (lowercase, `_`, `-`, `.`,
+  and `/`→`%2F`); a branch whose name contains uppercase or `%`
+  keeps its commits but its old head file (`branches/Main.json`)
+  and old workspace (`workspaces/<project>--Main`) are not picked
+  up — re-fork such branches, and remove the old workspace
+  directories by hand.
+- **No per-call trajectory refresh.** The `trajectory.json` the
+  tools maintained in the store after every call is gone: keeping it
+  current cost a walk of the touched branch's whole chain per call,
+  for a file the page cannot read. `trajectory()` still builds the
+  same data on demand.
+- **`exec`'s plumbing**: stdin is closed (a command reading it gets
+  EOF instead of waiting out the timeout), the child runs detached
+  in its own process group and a timeout kills the group, and the
+  call resolves on `exit` plus a short drain instead of `close` —
+  a background child holding the stdout pipe can no longer hold the
+  call open past its shell.
+- **Manifests are counted.** `storedBytes`/`dedupRatio` now include
+  the commit records — each checkpoint's full manifest — which for
+  a wide tree are a real share of the store (the review measured
+  128 MB of manifests for 200 checkpoints of a 5,000-file tree,
+  previously uncounted, under a description claiming history "costs
+  little more than the changes themselves"; the description now
+  states the real cost model). Stores written before 0.7.1 keep
+  their incremental record, which undercounts by the records written
+  before this version until the record is rebuilt (delete
+  `accounting.json` to force the rebuild walk).
+- The page's README images are pinned to a commit instead of the
+  moving `main`.
 
 ## Changes in 0.7.0
 

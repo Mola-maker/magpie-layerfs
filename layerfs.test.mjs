@@ -1,13 +1,14 @@
 import { afterAll, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync,
+  symlinkSync, writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { LayerfsTools } from "./index.mjs"
 import {
-  IMPORT_MAX_FILES, NativeBackend, SimBackend, createBackend, scanImportTree,
+  IMPORT_MAX_FILES, NativeBackend, SimBackend, checkSourceDir, createBackend, scanImportTree,
 } from "./layerfs.mjs"
 
 const sha = (s) => createHash("sha256").update(s).digest("hex")
@@ -116,11 +117,16 @@ test("fork copies no bytes and shares the history", async () => {
 })
 
 test("identical files are stored once (dedup at import)", async () => {
-  const { call } = await simTools()
+  const { call, home } = await simTools()
   await call("provision", { project: "website" })
   const st = await call("status", {})
   // unique contents: "hello layerfs\n" (14) + "A"*1000 (1000) + "console.log(1)\n" (15)
-  expect(st.storedBytes).toBe(14 + 1000 + 15)
+  // storedBytes is those blobs PLUS the import's commit record, whose
+  // manifest the accounting has counted since 0.7.1 (r2 item 7)
+  const cdir = join(home, "projects", "website", "commits")
+  const recordBytes = readdirSync(cdir).reduce((n, f) => n + statSync(join(cdir, f)).size, 0)
+  expect(recordBytes).toBeGreaterThan(0)
+  expect(st.storedBytes).toBe(14 + 1000 + 15 + recordBytes)
   expect(st.logicalBytes).toBe(14 + 1000 + 1000 + 15)
   expect(st.dedupRatio).toBeGreaterThan(1)
 })
@@ -331,7 +337,7 @@ test("item 4: the store is private, and a file's mode survives the store", async
   expect(mode(ws.path)).toBe(0o700)
   expect(mode(join(ws.path, "secret.txt"))).toBe(0o600) // 0600 in, 0600 out
   expect(mode(join(ws.path, "README.md"))).toBe(mode(join(src, "README.md"))) // the source's own mode, kept
-  expect(mode(join(home, "trajectory.json"))).toBe(0o600) // a pre-0.7 store wrote this 0644
+  expect(mode(join(home, "accounting.json"))).toBe(0o600) // record files stay private
 })
 
 test("item 5: the native backend needs an explicit opt-in, not just an SDK path", async () => {
@@ -361,7 +367,7 @@ test("item 5: the native backend needs an explicit opt-in, not just an SDK path"
   await expect(createBackend({ MAGPIE_LAYERFS_BACKEND: "bogus" })).rejects.toThrow("auto, native or sim")
 })
 
-test("item 8: tool calls record the trajectory in the store, never in the package", async () => {
+test("item 8 + r2 item 3: no trajectory file is maintained per call; the trajectory builds on demand", async () => {
   const pageFile = join(import.meta.dir, "page", "trajectory.js")
   const before = readFileSync(pageFile, "utf8")
   const { call, home } = await simTools()
@@ -370,14 +376,18 @@ test("item 8: tool calls record the trajectory in the store, never in the packag
   const feat = await call("provision", { project: "website", branch: "feat" })
   writeFileSync(join(feat.path, "f.txt"), "f\n")
   await call("checkpoint", { project: "website", branch: "feat", message: "work" })
-  expect(readFileSync(pageFile, "utf8")).toBe(before) // the shipped file is a sample, untouched
-  const rec = JSON.parse(readFileSync(join(home, "trajectory.json"), "utf8"))
-  expect(rec.sample).toBeUndefined()
-  const proj = rec.projects.find((p) => p.name === "website")
+  expect(readFileSync(pageFile, "utf8")).toBe(before) // the shipped file is a sample, untouched (item 8)
+  // 0.7.0 refreshed <root>/trajectory.json after every call; 0.7.1
+  // dropped that — the refresh re-walked branch chains per call for a
+  // file nothing reads (r2 item 3)
+  expect(existsSync(join(home, "trajectory.json"))).toBe(false)
+  // the trajectory itself is still there, built when asked
+  const traj = await new SimBackend(home).trajectory()
+  const proj = traj.projects.find((p) => p.name === "website")
   expect(proj.branches.map((x) => x.name).sort()).toEqual(["feat", "main"])
   const featSlice = proj.branches.find((x) => x.name === "feat")
   expect(featSlice.commits.at(-1).message).toBe("work")
-  expect(rec.totals.logicalBytes).toBeGreaterThan(0)
+  expect(traj.totals.logicalBytes).toBeGreaterThan(0)
 })
 
 test("items 9+10: slash branches are distinct, flat, and listed everywhere", async () => {
@@ -397,8 +407,135 @@ test("items 9+10: slash branches are distinct, flat, and listed everywhere", asy
   expect(h.commits[0].message).toBe("x work")
   const h2 = await call("history", { project: "website", branch: "feat__x" })
   expect(h2.commits[0].message).toContain("Import")
-  const rec = JSON.parse(readFileSync(join(st.root, "trajectory.json"), "utf8"))
-  expect(rec.projects[0].branches.map((x) => x.name).sort()).toEqual(["feat/x", "feat__x", "main"])
+  const traj = await new SimBackend(st.root).trajectory()
+  expect(traj.projects[0].branches.map((x) => x.name).sort()).toEqual(["feat/x", "feat__x", "main"])
+})
+
+// ---- the round-2 review's findings, one regression test each ------------------
+
+test("r2 item 1: the source guard compares real paths — a symlink to a refused directory is refused", async () => {
+  const cfg = mkTmp("magpie-config-")
+  writeFileSync(join(cfg, "plugin-auth.json"), JSON.stringify({ token: "secret" }))
+  // (a) a symlink whose target is the refused directory: resolve()
+  // spellings differ, real paths do not
+  const link = join(mkTmp("layerfs-links-"), "cfglink")
+  symlinkSync(cfg, link)
+  expect(() => checkSourceDir(link, { configDir: cfg })).toThrow("refusing to import")
+  // a symlink PARENT of the source is seen through the same way
+  const inner = join(mkTmp("layerfs-outer-"), "proj")
+  mkdirSync(inner)
+  const parentLink = join(mkTmp("layerfs-links-"), "parentlink")
+  symlinkSync(dirname(inner), parentLink)
+  expect(() => checkSourceDir(join(parentLink, "proj"), { configDir: dirname(inner) })).toThrow("refusing to import")
+  // and end to end: provision through the symlink is refused, nothing imported
+  const home = mkTmp("layerfs-home-")
+  process.env.MAGPIE_LAYERFS_HOME = home
+  process.env.MAGPIE_LAYERFS_BACKEND = "sim"
+  const { tool } = await LayerfsTools({ directory: cfg }, {})
+  const call = (name, args) => tool[name].execute(args, { agent: "test", abort: AbortSignal.timeout(5000) })
+  await expect(call("provision", { project: "website", source: link })).rejects.toThrow("refusing to import")
+  const st = await call("status", {})
+  expect(st.projects).toEqual([])
+})
+
+test("r2 item 1: the source guard folds case — a case-variant spelling of a refused root is refused", () => {
+  const mixed = mkTmp("Layerfs-Case-")
+  // the same directory, named by a differently-cased spelling: on a
+  // case-insensitive volume that spelling IS the directory; the
+  // guard's case-folded realpath comparison refuses it everywhere,
+  // including here, where the volume is case-sensitive and the
+  // lowercase spelling does not even exist as a path
+  const lowerSpelling = join(dirname(mixed), basename(mixed).toLowerCase())
+  expect(lowerSpelling).not.toBe(mixed)
+  expect(() => checkSourceDir(mixed, { configDir: lowerSpelling })).toThrow("refusing to import")
+  // the review's "~/.Config/Magpie" shape: an upper-case spelling of
+  // the source itself — refused as the config dir where the volume
+  // folds case, "not a directory" where it does not; never imported
+  const variant = join(dirname(mixed), basename(mixed).toUpperCase())
+  expect(() => checkSourceDir(variant, { configDir: mixed })).toThrow(/refusing to import|not a directory/)
+  // a refused root that does not exist at all must not make the guard throw the wrong error
+  const ok = mkTmp("layerfs-oksrc-")
+  expect(checkSourceDir(ok, { configDir: join(mkTmp("layerfs-gone-"), "nope") })).toBe(ok)
+})
+
+test("r2 item 2: project a branch b--c and project a--b branch c never share a workspace", async () => {
+  const { call } = await simTools() // its wrapper supplies the (ignored) source branch provisions require
+  const dirA = mkTmp("layerfs-srcA-")
+  writeFileSync(join(dirA, "a.txt"), "from A\n")
+  const dirB = mkTmp("layerfs-srcB-")
+  writeFileSync(join(dirB, "b.txt"), "from B\n")
+  await call("provision", { project: "a", source: dirA })
+  await call("fork", { project: "a", branch: "b--c" })
+  const pa = await call("provision", { project: "a", branch: "b--c" })
+  await call("provision", { project: "a--b", source: dirB })
+  await call("fork", { project: "a--b", branch: "c" })
+  const pb = await call("provision", { project: "a--b", branch: "c" })
+  // pre-fix both were workspaces/a--b--c, and pb answered a's checkout
+  expect(pb.path).not.toBe(pa.path)
+  expect(pb.reused).toBe(false)
+  expect(readFileSync(join(pb.path, "b.txt"), "utf8")).toBe("from B\n")
+  const st = await call("status", {})
+  expect(st.workspaces).toBe(4) // a/main, a/b--c, a--b/main, a--b/c — counted across project dirs
+  writeFileSync(join(pb.path, "b2.txt"), "more B\n")
+  const cp = await call("checkpoint", { project: "a--b", branch: "c", message: "B work" })
+  expect(cp.added).toBe(1)
+  expect(cp.deleted).toBe(0) // pre-fix this committed a's files into a--b (added 1, deleted 1)
+  const ha = await call("history", { project: "a", branch: "b--c" })
+  expect(ha.commits).toHaveLength(1) // a's branch untouched by a--b's checkpoint
+})
+
+test("r2 item 2: branches Main and main are distinct, on disk as in the model", async () => {
+  const { call } = await simTools()
+  await call("provision", { project: "website" })
+  await call("fork", { project: "website", branch: "Main" })
+  const lower = await call("provision", { project: "website", branch: "main" })
+  const upper = await call("provision", { project: "website", branch: "Main" })
+  // %4Dain vs main: distinct files even on a case-insensitive volume —
+  // pre-fix they shared branches/main.json and one workspace
+  expect(upper.path).not.toBe(lower.path)
+  writeFileSync(join(upper.path, "upper.txt"), "upper\n")
+  await call("checkpoint", { project: "website", branch: "Main", message: "upper work" })
+  const mainHist = await call("history", { project: "website", branch: "main" })
+  expect(mainHist.commits).toHaveLength(1) // a checkpoint on Main did not move main's head
+  const st = await call("status", {})
+  expect(st.projects[0].branches).toEqual(["Main", "main"])
+})
+
+test("r2 item 6: exec's stdin is closed — a command that reads it finishes at once", async () => {
+  const { call } = await simTools()
+  await call("provision", { project: "website" })
+  const t0 = Date.now()
+  const r = await call("exec", { project: "website", command: "cat", timeoutMs: 5000 })
+  expect(r.timedOut).toBeUndefined()
+  expect(r.exitCode).toBe(0)
+  expect(Date.now() - t0).toBeLessThan(3000) // pre-fix: an open stdin pipe held it to the full timeout
+})
+
+test("r2 item 6: background children cannot hold an exec call open, and a timeout kills the group", async () => {
+  const { call } = await simTools()
+  await call("provision", { project: "website" })
+  const t0 = Date.now()
+  const r = await call("exec", { project: "website", command: "sleep 6 & echo started", timeoutMs: 1000 })
+  expect(r.stdout).toContain("started")
+  expect(Date.now() - t0).toBeLessThan(4000) // pre-fix: ~6011 ms, waiting for 'close' on the held pipe
+  const t1 = Date.now()
+  const r2 = await call("exec", { project: "website", command: "sleep 30", timeoutMs: 1000 })
+  expect(r2.timedOut).toBe(true)
+  expect(Date.now() - t1).toBeLessThan(4000) // the group kill lands; no orphaned sleep outlives the call
+})
+
+test("r2 item 7: storedBytes grows by the commit record's size, not just the changed blobs", async () => {
+  const { call, home } = await simTools()
+  const ws = await call("provision", { project: "website" })
+  const before = await call("status", {})
+  writeFileSync(join(ws.path, "tiny.txt"), "x") // a 1-byte change on the imported tree
+  const cp = await call("checkpoint", { project: "website", message: "tiny" })
+  expect(cp.newBytes).toBe(1)
+  const after = await call("status", {})
+  const recordBytes = statSync(join(home, "projects", "website", "commits", `${cp.commit}.json`)).size
+  expect(recordBytes).toBeGreaterThan(0)
+  // pre-fix the growth was 1 (the blob alone); the manifest record is counted now
+  expect(after.storedBytes - before.storedBytes).toBe(recordBytes + 1)
 })
 
 // ---- the native backend against a fake SDK ------------------------------------

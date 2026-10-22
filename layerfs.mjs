@@ -31,7 +31,7 @@ import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
   chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync,
-  statSync, writeFileSync,
+  realpathSync, statSync, writeFileSync,
 } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, parse, resolve, sep } from "node:path"
@@ -81,18 +81,39 @@ const nowIso = () => new Date().toISOString()
 
 // ---- on-disk names -------------------------------------------------------------
 // A branch name maps to ONE flat file (its head record) and one workspace
-// directory segment. "%" and "/" are percent-encoded, so the mapping is
-// injective: feat/x and feat__x are different branches with different
-// files (feat%2Fx.json vs feat__x.json), and every branch — slash
-// branches included — sits at the top level, where listBranches reads.
-// (Pre-0.7 stores nested a slash branch's head at branches/feat/x.json
-// and named its workspace feat__x, colliding with a real feat__x; those
-// layouts are not migrated — see the README's 0.7.0 notes.)
+// directory segment. Every character outside [a-z0-9._-] is percent-
+// encoded, so the mapping is injective AND case-injective: feat/x and
+// feat__x are different branches with different files (feat%2Fx.json vs
+// feat__x.json), and Main and main stay different on a case-insensitive
+// volume too (branches/%4Dain.json vs branches/main.json). Every branch
+// — slash branches included — sits at the top level, where listBranches
+// reads. (Pre-0.7.1 encoders left some collisions: 0.7.0 encoded only
+// "%" and "/", so uppercase branches shared files on case-insensitive
+// volumes; pre-0.7 layouts are not migrated — see the README's notes.)
 export function encodeBranchName(branch) {
-  return branch.replace(/%/g, "%25").replace(/\//g, "%2F")
+  let out = ""
+  for (const ch of branch)
+    out += /[a-z0-9._-]/.test(ch)
+      ? ch
+      : "%" + ch.codePointAt(0).toString(16).toUpperCase().padStart(2, "0")
+  return out
 }
 export function decodeBranchName(stem) {
-  return stem.replace(/%2F/gi, "/").replace(/%25/g, "%")
+  return stem.replace(/%([0-9A-Fa-f]{2})/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+}
+
+// Workspaces live one directory per project — workspaces/<project>/
+// <encoded branch> — because a flat `${project}--${branch}` name is
+// not injective when both sides may contain "--" (project a branch
+// b--c vs project a--b branch c). Project names cannot contain "/",
+// so the per-project directory cannot collide. Counting workspaces
+// means summing the branch directories across the project ones.
+function countWorkspaces(workspacesDir) {
+  if (!existsSync(workspacesDir)) return 0
+  let n = 0
+  for (const e of readdirSync(workspacesDir, { withFileTypes: true }))
+    if (e.isDirectory()) n += readdirSync(join(workspacesDir, e.name)).length
+  return n
 }
 
 // ---- private writes --------------------------------------------------------------
@@ -121,12 +142,35 @@ function mkdirPrivate(dir) {
 // config directory, the classic credential stores, the home directory
 // and the filesystem root are refused outright — as source, as a
 // parent of the source, or inside it.
+// The guard compares REAL paths, not spellings. A string comparison
+// of resolve()d paths is bypassed two ways (round-2 review, item 1):
+// a symlink pointing at a refused directory (readdirSync follows the
+// root link), and a case-variant spelling on a case-insensitive
+// volume ("~/.Config/Magpie", "~/.AWS"). So both sides are
+// canonicalized with realpathSync and case-folded before comparing.
+// A refused root that does not exist is canonicalized through its
+// nearest existing ancestor — it can still be named by a case
+// variant or reached through a symlinked parent, and canonicalizing
+// it must never be what throws.
+function canonicalForCompare(p) {
+  let cur = resolve(p)
+  const tail = []
+  for (;;) {
+    try { return join(realpathSync(cur), ...tail).toLowerCase() } catch { /* not there: walk up */ }
+    const parent = dirname(cur)
+    if (parent === cur) return resolve(p).toLowerCase()
+    tail.unshift(cur.slice(parent.length + 1))
+    cur = parent
+  }
+}
+
 export function checkSourceDir(sourceDir, { configDir, storeRoot } = {}) {
   if (typeof sourceDir !== "string" || !sourceDir)
     throw new Error("source is required: the directory to import when the project is first created — pass the directory the user chose for this project")
-  const src = resolve(sourceDir)
-  if (!existsSync(src) || !statSync(src).isDirectory())
+  const given = resolve(sourceDir)
+  if (!existsSync(given) || !statSync(given).isDirectory())
     throw new Error(`source is not a directory: ${sourceDir}`)
+  const src = canonicalForCompare(given) // real path, case-folded: the guard's currency
   const overlaps = (a, b) => a === b || a.startsWith(b + sep) || b.startsWith(a + sep)
   const refuses = [
     [join(homedir(), ".config", "magpie"), "magpie's config directory, which holds plugin credentials (plugin-auth.json)"],
@@ -134,15 +178,15 @@ export function checkSourceDir(sourceDir, { configDir, storeRoot } = {}) {
     [join(homedir(), ".aws"), "the AWS directory"],
     [join(homedir(), ".gnupg"), "the GnuPG directory"],
   ]
-  if (configDir) refuses.unshift([resolve(configDir), "magpie's config directory, which holds plugin credentials (plugin-auth.json)"])
+  if (configDir) refuses.unshift([configDir, "magpie's config directory, which holds plugin credentials (plugin-auth.json)"])
   for (const [dir, what] of refuses)
-    if (overlaps(src, dir))
-      throw new Error(`refusing to import ${src}: it is, contains, or sits inside ${what}`)
-  if (src === homedir() || src === parse(src).root)
-    throw new Error(`refusing to import ${src}: importing a home directory or a filesystem root would sweep far more than one project into the store — pass the project's own directory`)
-  if (storeRoot && overlaps(src, resolve(storeRoot)))
-    throw new Error(`refusing to import ${src}: it overlaps the plugin's own store`)
-  return src
+    if (overlaps(src, canonicalForCompare(dir)))
+      throw new Error(`refusing to import ${given}: it is, contains, or sits inside ${what}`)
+  if (src === canonicalForCompare(homedir()) || src === canonicalForCompare(parse(given).root))
+    throw new Error(`refusing to import ${given}: importing a home directory or a filesystem root would sweep far more than one project into the store — pass the project's own directory`)
+  if (storeRoot && overlaps(src, canonicalForCompare(storeRoot)))
+    throw new Error(`refusing to import ${given}: it overlaps the plugin's own store`)
+  return given
 }
 
 // Secret-shaped paths never enter the store from an import: VCS
@@ -254,19 +298,41 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n) + `\n… [${s.length - n} m
 // at the workspace's scratch directories (created first, so workspaces
 // provisioned before they existed get them too): temporary files and
 // caches stay inside the workspace instead of leaking to the host /tmp.
+//
+// The process plumbing is deliberate (round-2 review, item 6): stdin
+// is closed, so a command that reads it gets EOF instead of waiting
+// out the timeout; the child leads its own process group (detached),
+// so a timeout kills the whole tree, not just /bin/sh; and the caller
+// resolves on 'exit' plus a short drain, not on 'close' — a background
+// child holding the stdout pipe open must not hold the call open.
 function runShell(command, dir, timeoutMs) {
   return new Promise((resolvePromise) => {
     ensureScratch(dir)
     const child = spawn("/bin/sh", ["-c", command], {
       cwd: dir,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, TMPDIR: join(dir, ".tmp"), XDG_CACHE_HOME: join(dir, ".cache") },
     })
-    let out = "", err = "", timedOut = false
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL") }, timeoutMs)
+    let out = "", err = "", timedOut = false, settled = false
+    let timer = null
+    const finish = (code) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolvePromise({ code: code ?? -1, stdout: clip(out, 8192), stderr: clip(err, 8192), timedOut })
+    }
+    timer = setTimeout(() => {
+      timedOut = true
+      try { process.kill(-child.pid, "SIGKILL") } // the whole group
+      catch { try { child.kill("SIGKILL") } catch { /* already gone */ } }
+      // 'exit' follows the group kill; this is only a backstop
+      setTimeout(() => finish(-1), 250).unref()
+    }, timeoutMs)
     child.stdout.on("data", (d) => { if (out.length < 65536) out += d })
     child.stderr.on("data", (d) => { if (err.length < 65536) err += d })
-    child.on("error", (e) => { clearTimeout(timer); resolvePromise({ code: -1, stdout: out, stderr: String(e), timedOut }) })
-    child.on("close", (code) => { clearTimeout(timer); resolvePromise({ code: code ?? -1, stdout: clip(out, 8192), stderr: clip(err, 8192), timedOut }) })
+    child.on("error", (e) => { err += String(e); finish(-1) })
+    child.on("exit", (code) => { setTimeout(() => finish(code), 25).unref() })
   })
 }
 
@@ -301,10 +367,14 @@ export class SimBackend {
     }
     return { sha, fresh: 0 }
   }
-  // Byte accounting, kept incrementally in a small record so status and
-  // the trajectory refresh never walk the whole store: putBlob and
-  // makeCommit bump it as they write. A missing record (a pre-0.7
-  // store) is rebuilt by one walk and then maintained.
+  // Byte accounting, kept incrementally in a small record so status
+  // never walks the whole store: putBlob and makeCommit bump it as
+  // they write. storedBytes is the bytes the store actually occupies:
+  // blob bytes PLUS the commit records (each holds its checkpoint's
+  // full manifest — for a wide tree that is the larger half, and it
+  // was not counted before 0.7.1; round-2 review, item 7). A missing
+  // record (a pre-0.7 store) is rebuilt by one walk and then
+  // maintained; a pre-0.7.1 record undercounts until it is rebuilt.
   accountingPath() { return join(this.root, "accounting.json") }
   readAccounting() {
     try { return JSON.parse(readFileSync(this.accountingPath(), "utf8")) } catch { return null }
@@ -333,6 +403,13 @@ export class SimBackend {
       }
     }
     walk(this.objectsDir)
+    // the commit records count too: each carries a full manifest
+    if (existsSync(this.projectsDir))
+      for (const name of readdirSync(this.projectsDir)) {
+        const cdir = join(this.projectDir(name), "commits")
+        if (existsSync(cdir))
+          for (const f of readdirSync(cdir)) n += statSync(join(cdir, f)).size
+      }
     return n
   }
   logicalBytesWalk() {
@@ -363,6 +440,7 @@ export class SimBackend {
   writeCommit(project, commit) {
     mkdirPrivate(join(this.projectDir(project), "commits"))
     writeJson(this.commitPath(project, commit.id), commit, true)
+    return statSync(this.commitPath(project, commit.id)).size
   }
   branchHeadPath(project, branch) { return join(this.projectDir(project), "branches", `${encodeBranchName(branch)}.json`) }
   branchExists(project, branch) { return existsSync(this.branchHeadPath(project, branch)) }
@@ -388,8 +466,8 @@ export class SimBackend {
       manifest, files: Object.keys(manifest).length,
       logicalBytes: manifestBytes(manifest), newBytes, delta,
     }
-    this.writeCommit(project, commit)
-    this.bumpAccounting({ logicalDelta: commit.logicalBytes })
+    const recordBytes = this.writeCommit(project, commit)
+    this.bumpAccounting({ logicalDelta: commit.logicalBytes, storedDelta: recordBytes })
     this.setHead(project, branch, id)
     return commit
   }
@@ -430,7 +508,7 @@ export class SimBackend {
     return { created: true, commit: commit.id, skipped }
   }
 
-  workspaceDir(project, branch) { return join(this.workspacesDir, `${project}--${encodeBranchName(branch)}`) }
+  workspaceDir(project, branch) { return join(this.workspacesDir, project, encodeBranchName(branch)) }
 
   async provision(project, branch = "main", sourceDir) {
     const created = await this.ensureProject(project, sourceDir)
@@ -613,42 +691,15 @@ export class SimBackend {
     }
   }
 
-  // The live recording lives in the store, never in the package
-  // directory: the tools used to rewrite page/trajectory.js beside the
-  // page after every call — a write into the installed plugin cache,
-  // and a full-store rescan per call. A refresh is scoped instead:
-  // only the named project's slice is rebuilt (one branch-chain walk);
-  // the other slices are carried over, and the totals come from the
-  // maintained accounting, not a walk. With no project named, only the
-  // events and totals are refreshed.
-  trajectoryPath() { return join(this.root, "trajectory.json") }
-  async refreshTrajectoryFile(project) {
-    let data = null
-    try { data = JSON.parse(readFileSync(this.trajectoryPath(), "utf8")) } catch { /* first refresh */ }
-    if (!data) {
-      data = await this.trajectory()
-    } else {
-      if (project) {
-        const slice = await this.trajectoryProject(project)
-        if (slice) {
-          const i = data.projects.findIndex((p) => p.name === project)
-          if (i >= 0) data.projects[i] = slice
-          else data.projects.push(slice)
-          data.projects.sort((a, b) => a.name.localeCompare(b.name))
-        }
-      }
-      data.events = this.readEvents()
-      const st = await this.status()
-      data.totals = {
-        logicalBytes: st.logicalBytes, storedBytes: st.storedBytes,
-        savedBytes: st.savedBytes, dedupRatio: st.dedupRatio, workspaces: st.workspaces,
-      }
-      data.generatedAt = nowIso()
-      data.backend = this.kind
-    }
-    writeJson(this.trajectoryPath(), data)
-    return data
-  }
+  // The recorded trajectory is built ON DEMAND by trajectory() and
+  // by nothing else. An earlier version also kept a trajectory.json
+  // in the store refreshed after every tool call — even scoped to
+  // one project that re-walked the branch's whole chain, so the cost
+  // of every call grew with the history, for a file the page cannot
+  // read (its bridge serves a fixed host list) and nothing else did
+  // (round-2 review, item 3). Removed in 0.7.1: no tool call creates
+  // or updates a trajectory.json anymore. The page keeps its bundled
+  // sample until the host can serve plugin data to a page.
 
   async resolve(project, branch = "main", inner = "") {
     const headId = this.head(project, branch)
@@ -679,7 +730,7 @@ export class SimBackend {
     const stored = this.storedBytes()
     const a = this.readAccounting()
     const logical = a && Number.isFinite(a.logicalBytes) ? a.logicalBytes : this.logicalBytesWalk()
-    const workspaces = existsSync(this.workspacesDir) ? readdirSync(this.workspacesDir).length : 0
+    const workspaces = countWorkspaces(this.workspacesDir)
     return {
       backend: this.kind, root: this.root, projects, workspaces,
       logicalBytes: logical, storedBytes: stored,
@@ -850,7 +901,7 @@ export class NativeBackend {
     writeJson(this.statePath(project), state, true)
   }
 
-  workspaceDir(project, branch) { return join(this.workspacesDir, `${project}--${encodeBranchName(branch)}`) }
+  workspaceDir(project, branch) { return join(this.workspacesDir, project, encodeBranchName(branch)) }
   readBinding(dir) {
     try { return JSON.parse(readFileSync(join(dir, BINDING), "utf8")) } catch { return null }
   }
@@ -1172,7 +1223,7 @@ export class NativeBackend {
         layers: 1 + state.publishes.length,
       })
     }
-    const workspaces = existsSync(this.workspacesDir) ? readdirSync(this.workspacesDir).length : 0
+    const workspaces = countWorkspaces(this.workspacesDir)
     return {
       backend: this.kind, root: this.nativeRoot, storePath: this.storePathEnv,
       projects, workspaces,
@@ -1232,36 +1283,9 @@ export class NativeBackend {
     }
   }
 
-  // The live recording, in the store — see the sim backend's
-  // refreshTrajectoryFile for why it no longer lives beside the page.
-  // Scoped the same way: only the named project's slice and its publish
-  // events are rebuilt.
-  trajectoryPath() { return join(this.nativeRoot, "trajectory.json") }
-  async refreshTrajectoryFile(project) {
-    let data = null
-    try { data = JSON.parse(readFileSync(this.trajectoryPath(), "utf8")) } catch { /* first refresh */ }
-    if (!data) {
-      data = await this.trajectory()
-    } else {
-      if (project) {
-        const slice = await this.trajectoryProject(project)
-        const i = data.projects.findIndex((p) => p.name === project)
-        if (i >= 0) data.projects[i] = slice
-        else data.projects.push(slice)
-        data.events = [...data.events.filter((e) => e.project !== project), ...this.publishEvents(project)]
-          .sort((a, b) => String(a.t).localeCompare(String(b.t)))
-      }
-      const st = await this.status()
-      data.totals = {
-        logicalBytes: st.logicalBytes, storedBytes: st.storedBytes,
-        savedBytes: st.savedBytes, dedupRatio: st.dedupRatio, workspaces: st.workspaces,
-      }
-      data.generatedAt = nowIso()
-      data.backend = this.kind
-    }
-    writeJson(this.trajectoryPath(), data)
-    return data
-  }
+  // The recorded trajectory is built ON DEMAND by trajectory(),
+  // exactly as in the sim backend — no per-call trajectory.json is
+  // maintained in the store anymore (0.7.1; round-2 review, item 3).
 }
 
 // ---- selection ---------------------------------------------------------------------

@@ -29,15 +29,14 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
   let backendPromise
   const backend = () => (backendPromise ??= createBackend(process.env, options))
   const execEnabled = () => options?.exec === true || process.env.MAGPIE_LAYERFS_EXEC === "1"
-  const call = async (fn, project) => {
+  // A call touches only the state its own operation needs. Nothing
+  // here maintains a recorded trajectory file: an earlier version
+  // refreshed one in the store after every call, at a cost that grew
+  // with the project's history, for a file the page cannot read — the
+  // trajectory is built on demand by the backend when asked (0.7.1).
+  const call = async (fn) => {
     const b = await backend()
-    const out = await fn(b)
-    // Keep the recorded trajectory current — in the store, scoped to
-    // the project this call touched, never in the package directory
-    // (the page's bundled file is a sample, not a recording surface).
-    // A failure here must never fail the tool call itself.
-    try { await b.refreshTrajectoryFile?.(project) } catch { /* the picture is a bonus, never a dependency */ }
-    return out
+    return fn(b)
   }
 
   return {
@@ -70,13 +69,14 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
           if (args.source === undefined) throw new Error(
             "source is required: the directory to import when the project is first created — pass the directory the user chose for this project")
           const source = checkSourceDir(str(args.source, "source"), { configDir: ctx.directory })
-          return call((b) => b.provision(project, branch, source), project)
+          return call((b) => b.provision(project, branch, source))
         },
       },
       checkpoint: {
         description:
-          "Saves the workspace's current state as a deduplicated checkpoint on its branch: only blobs the store has not seen are written, " +
-          "so keeping the full history of a large tree costs little more than the changes themselves. " +
+          "Saves the workspace's current state as a deduplicated checkpoint on its branch: only blobs the store has not seen are written. " +
+          "The real cost model: the changed blobs, plus one commit record per checkpoint holding the tree's full manifest — " +
+          "for a wide tree the manifests are a real part of the store's bytes, and the storage accounting counts them. " +
           "Answers the commit id and the added / modified / deleted counts with the new-bytes and saved-bytes accounting.",
         args: {
           type: "object",
@@ -90,7 +90,7 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
         async execute(args) {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(opt(args.branch, "branch", "main"))
-          return call((b) => b.checkpoint(project, branch, opt(args.message, "message", "")), project)
+          return call((b) => b.checkpoint(project, branch, opt(args.message, "message", "")))
         },
       },
       fork: {
@@ -110,7 +110,7 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(str(args.branch, "branch"))
           const from = checkBranch(opt(args.from, "from", "main"))
-          return call((b) => b.fork(project, branch, from), project)
+          return call((b) => b.fork(project, branch, from))
         },
       },
       publish: {
@@ -130,7 +130,7 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
         async execute(args) {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(str(args.branch, "branch"))
-          return call((b) => b.publish(project, branch, { force: args.force === true }), project)
+          return call((b) => b.publish(project, branch, { force: args.force === true }))
         },
       },
       exec: {
@@ -162,7 +162,7 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
           const command = str(args.command, "command")
           const message = args.message === undefined ? "" : str(args.message, "message")
           const timeoutMs = args.timeoutMs === undefined ? 50000 : Number(args.timeoutMs) || 50000
-          return call((b) => b.exec(project, branch, command, message, timeoutMs), project)
+          return call((b) => b.exec(project, branch, command, message, timeoutMs))
         },
       },
       history: {
@@ -182,7 +182,7 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(opt(args.branch, "branch", "main"))
           const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(200, Number(args.limit) || 20))
-          return call((b) => b.history(project, branch, limit), project)
+          return call((b) => b.history(project, branch, limit))
         },
       },
       resolve: {
@@ -203,7 +203,7 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(opt(args.branch, "branch", "main"))
           const inner = args.path === undefined || args.path === "" ? "" : checkInnerPath(str(args.path, "path"))
-          return call((b) => b.resolve(project, branch, inner), project)
+          return call((b) => b.resolve(project, branch, inner))
         },
       },
       status: {

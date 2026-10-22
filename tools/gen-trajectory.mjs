@@ -2,8 +2,10 @@
 // own sim backend through the benchmark scenario (one project, six
 // agents, three checkpoints each) in a throwaway store, and write the
 // recorded trajectory next to the page. The bundled file is a static
-// sample — nothing rewrites it at runtime; the live recording lives in
-// the store as trajectory.json (the tools refresh it there).
+// sample — nothing rewrites it at runtime. The tools build the same
+// shape on demand (backend.trajectory()); no per-call recording is
+// kept in the store (that refresh was removed in 0.7.1 — it cost a
+// branch-chain walk per tool call for a file the page cannot read).
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
