@@ -32,6 +32,16 @@ Served on magpie's MCP server as `layerfs_<tool>`:
 | `resolve` | Resolves a project / branch / file to a real filesystem path, its checkpoint and content hash — an O(1) lookup, no copying. |
 | `status` | Backend in use, projects and branches held, and the storage accounting: logical bytes of all checkpoints vs bytes the store occupies. |
 
+Only the workspace path is persistent. Every workspace carries two
+scratch directories, `.tmp/` and `.cache/`, created at provision;
+`exec` runs commands with `TMPDIR` and `XDG_CACHE_HOME` redirected at
+them, so toolchains keep their temporary files and caches inside the
+workspace instead of the host's real `/tmp`. Both directories are
+workspace-local scratch: checkpoints and publishes never capture them,
+and they live and die with the workspace directory itself. Files a
+command writes to the host's real `/tmp` are likewise outside LayerFS
+management — if it matters, it belongs in the workspace.
+
 ## Backends
 
 - **native** — the real LayerFS through its JavaScript SDK

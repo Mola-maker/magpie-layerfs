@@ -41,5 +41,5 @@
     "url": "git+https://github.com/Mola-maker/magpie-layerfs.git"
   },
   "type": "module",
-  "version": "0.4.0"
+  "version": "0.4.1"
 }

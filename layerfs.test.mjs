@@ -186,6 +186,43 @@ test("exec runs in the workspace and checkpoints what changed", async () => {
   expect(failed.changed).toBe(true) // a failing command's edits are still history
 })
 
+test("exec redirects TMPDIR and the cache home into the workspace scratch dirs", async () => {
+  const { call } = await simTools()
+  const ws = await call("provision", { project: "website" })
+  // provision pre-creates both scratch directories
+  expect(existsSync(join(ws.path, ".tmp"))).toBe(true)
+  expect(existsSync(join(ws.path, ".cache"))).toBe(true)
+  const r = await call("exec", {
+    project: "website",
+    command: 'echo "$TMPDIR" && echo scratch > "$TMPDIR/probe.txt" && echo cache > "$XDG_CACHE_HOME/probe.txt"',
+  })
+  expect(r.exitCode).toBe(0)
+  expect(r.stdout).toContain(join(ws.path, ".tmp")) // $TMPDIR points inside the workspace
+  expect(readFileSync(join(ws.path, ".tmp", "probe.txt"), "utf8")).toBe("scratch\n")
+  expect(readFileSync(join(ws.path, ".cache", "probe.txt"), "utf8")).toBe("cache\n")
+  // scratch is not history: a run that touched only scratch commits nothing
+  expect(r.changed).toBe(false)
+  expect(r.commit).toBeNull()
+})
+
+test("checkpoint never captures the scratch directories", async () => {
+  const { call } = await simTools()
+  const ws = await call("provision", { project: "website" })
+  writeFileSync(join(ws.path, ".tmp", "junk.txt"), "junk\n")
+  writeFileSync(join(ws.path, ".cache", "junk.txt"), "junk\n")
+  writeFileSync(join(ws.path, "real.txt"), "real\n") // the one real change, 5 bytes
+  const cp = await call("checkpoint", { project: "website", message: "with scratch present" })
+  expect(cp.added).toBe(1) // real.txt only — the scratch files are not counted
+  expect(cp.modified).toBe(0)
+  expect(cp.deleted).toBe(0)
+  expect(cp.files).toBe(5) // the 4 imported files + real.txt
+  expect(cp.newBytes).toBe(5)
+  expect(cp.logicalBytes).toBe(14 + 1000 + 1000 + 15 + 5)
+  // the scratch content itself stays put in the live workspace
+  expect(readFileSync(join(ws.path, ".tmp", "junk.txt"), "utf8")).toBe("junk\n")
+  expect(readFileSync(join(ws.path, ".cache", "junk.txt"), "utf8")).toBe("junk\n")
+})
+
 // ---- native backend against the real SDK -------------------------------------
 // Opt-in: these run only when MAGPIE_LAYERFS_NATIVE_TEST=1 and
 // LAYERFS_SDK_PATH points at a layerfs checkout whose native binding is
@@ -248,4 +285,28 @@ nativeIt("native: publish appends a Layer, and the trajectory replays it", async
   expect(e.changed).toBe(true)
   const st = await b.status()
   expect(st.projects[0].layers).toBe(2) // import + one publish
+}, 60000)
+
+nativeIt("native: exec scratch stays inside the workspace and out of checkpoints", async () => {
+  process.env.LAYERFS_SDK_PATH = NATIVE_SDK
+  const root = mkdtempSync(join(process.env.HOME, "workspace", ".tmp-native-test-"))
+  const b = new NativeBackend(root)
+  const p = await b.provision("scratchy", "main", fixture())
+  // provision (through materialize) pre-creates both scratch directories
+  expect(existsSync(join(p.path, ".tmp"))).toBe(true)
+  expect(existsSync(join(p.path, ".cache"))).toBe(true)
+  const e = await b.exec("scratchy", "main",
+    'echo "$TMPDIR" && echo probe > "$TMPDIR/probe.txt" && echo probe > "$XDG_CACHE_HOME/probe.txt"')
+  expect(e.exitCode).toBe(0)
+  expect(e.stdout).toContain(join(p.path, ".tmp"))
+  expect(readFileSync(join(p.path, ".tmp", "probe.txt"), "utf8")).toBe("probe\n")
+  expect(readFileSync(join(p.path, ".cache", "probe.txt"), "utf8")).toBe("probe\n")
+  // a checkpoint after scratch-only writes is still UpToDate
+  expect(e.changed).toBe(false)
+  expect(e.commit).toBeNull()
+  const c = await b.checkpoint("scratchy", "main", "scratch only")
+  expect(c.changed).toBe(false)
+  expect(c.added).toBe(0)
+  expect(c.modified).toBe(0)
+  expect(c.deleted).toBe(0)
 }, 60000)

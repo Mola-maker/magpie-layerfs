@@ -49,7 +49,9 @@ export const LayerfsTools = async (ctx = {}) => {
           "Gives the agent a LayerFS workspace for a project branch and answers the filesystem path to work in. " +
           "The first provision of a project imports the source directory (default: the agent's working directory) as its first checkpoint; " +
           "later provisions of the same branch answer the same path without copying the tree again. " +
-          "Work in the returned path, then save progress with the checkpoint tool.",
+          "Work in the returned path, then save progress with the checkpoint tool. " +
+          "Only the returned path is persistent — work anywhere else, including the host's /tmp, is outside LayerFS management; " +
+          "the workspace also carries .tmp/ and .cache/ scratch directories (exec points TMPDIR and XDG_CACHE_HOME at them), which checkpoint and publish never capture.",
         args: {
           type: "object",
           properties: {
@@ -130,6 +132,8 @@ export const LayerfsTools = async (ctx = {}) => {
         description:
           "Runs a shell command inside a branch's provisioned workspace and checkpoints whatever it changed as one commit: run, test, fix, all captured in the branch's history. " +
           "A command that changes nothing commits nothing. A failing command's changes are still checkpointed (history can be rewound), and its exit code, stdout and stderr are returned. " +
+          "Only the workspace path is persistent: the command runs with TMPDIR and XDG_CACHE_HOME redirected into the workspace (.tmp/ and .cache/), " +
+          "workspace-local scratch that checkpoint and publish never capture, and files written to the host's real /tmp are likewise outside LayerFS management. " +
           "The command runs with the plugin host's privileges in the workspace directory; the timeout is capped at 55 seconds, the tools budget.",
         args: {
           type: "object",

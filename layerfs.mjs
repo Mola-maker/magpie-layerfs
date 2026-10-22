@@ -35,6 +35,18 @@ import { pathToFileURL } from "node:url"
 
 const BINDING = ".layerfs.json"
 
+// Workspace-local scratch: two directories at the workspace root that
+// are never checkpointed and never published. provision creates them,
+// exec points TMPDIR and XDG_CACHE_HOME at them so toolchains keep
+// their temporary files and caches inside the workspace instead of
+// the host's real /tmp, and every checkpoint scan skips both names —
+// their content lives and dies with the workspace directory itself.
+const SCRATCH_DIRS = [".tmp", ".cache"]
+const scanSkip = () => new Set([BINDING, ...SCRATCH_DIRS])
+function ensureScratch(dir) {
+  for (const name of SCRATCH_DIRS) mkdirSync(join(dir, name), { recursive: true })
+}
+
 // ---- names -------------------------------------------------------------------
 
 // Project names follow the SDK's rule: 1-63 chars of lowercase ASCII letters,
@@ -98,10 +110,18 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n) + `\n… [${s.length - n} m
 
 // Run a shell command in dir, capturing bounded output. Resolves with
 // { code, stdout, stderr, timedOut }; never rejects on a non-zero exit —
-// the caller reports the code, as a shell would.
+// the caller reports the code, as a shell would. The child inherits
+// the host environment except TMPDIR and XDG_CACHE_HOME, which point
+// at the workspace's scratch directories (created first, so workspaces
+// provisioned before they existed get them too): temporary files and
+// caches stay inside the workspace instead of leaking to the host /tmp.
 function runShell(command, dir, timeoutMs) {
   return new Promise((resolvePromise) => {
-    const child = spawn("/bin/sh", ["-c", command], { cwd: dir })
+    ensureScratch(dir)
+    const child = spawn("/bin/sh", ["-c", command], {
+      cwd: dir,
+      env: { ...process.env, TMPDIR: join(dir, ".tmp"), XDG_CACHE_HOME: join(dir, ".cache") },
+    })
     let out = "", err = "", timedOut = false
     const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL") }, timeoutMs)
     child.stdout.on("data", (d) => { if (out.length < 65536) out += d })
@@ -244,6 +264,7 @@ export class SimBackend {
     }
     const commit = this.readCommit(project, headId)
     mkdirSync(dir, { recursive: true })
+    ensureScratch(dir)
     for (const [rel, f] of Object.entries(commit.manifest)) {
       const out = join(dir, ...rel.split("/"))
       mkdirSync(dirname(out), { recursive: true })
@@ -263,7 +284,7 @@ export class SimBackend {
     if (!existsSync(join(dir, BINDING))) throw new Error(`no workspace for ${project}/${branch}; provision it first`)
     const parent = this.head(project, branch)
     const prev = this.readCommit(project, parent)
-    const manifest = scanTree(dir, new Set([BINDING]))
+    const manifest = scanTree(dir, scanSkip())
     const newBytes = this.storeManifestFiles(dir, manifest)
     let added = 0, modified = 0, deleted = 0
     for (const [rel, f] of Object.entries(manifest)) {
@@ -330,7 +351,7 @@ export class SimBackend {
     if (!existsSync(join(dir, BINDING))) throw new Error(`no workspace for ${project}/${branch}; provision it first`)
     const prev = this.readCommit(project, this.head(project, branch))
     const r = await runShell(command, dir, Math.min(Math.max(100, timeoutMs || 50000), 55000))
-    const manifest = scanTree(dir, new Set([BINDING]))
+    const manifest = scanTree(dir, scanSkip())
     const changed = !sameManifest(prev.manifest, manifest)
     let commit = null
     if (changed) {
@@ -658,6 +679,7 @@ export class NativeBackend {
     const skippedBinary = []
     rmSync(dir, { recursive: true, force: true })
     mkdirSync(dir, { recursive: true })
+    ensureScratch(dir)
     let files = 0
     for (const [path, entry] of [...tree].sort()) {
       const local = join(dir, ...path.split("/").filter(Boolean))
@@ -701,7 +723,7 @@ export class NativeBackend {
     const binding = this.readBinding(dir)
     if (!binding) throw new Error(`no workspace for ${project}/${branch}; provision it first`)
     const lfs = await this.client(project)
-    const local = scanTree(dir, new Set([BINDING]))
+    const local = scanTree(dir, scanSkip())
     const remote = await this.remoteTree(lfs, branch)
     const changes = [], skippedBinary = []
     let added = 0, modified = 0, deleted = 0
