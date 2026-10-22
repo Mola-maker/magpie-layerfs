@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 
 const dir = import.meta.dir
@@ -24,9 +24,57 @@ test("the package declares the page magpie shows", () => {
   const html = read("index.html")
   expect(html).toContain("_magpie/bridge.js") // the host serves the bridge beside every page
   expect(html).toContain('src="trajectory.js"')
-  // the page sandbox forbids inline scripts and any fetch; the only data
-  // script is the recorded trajectory the tools write
+  // the page sandbox forbids inline scripts and any fetch; the only
+  // data script is the bundled sample trajectory shipped with the page
   expect(html).not.toMatch(/<script>(?!\s*src)/)
+})
+
+test("item 13: the page reads only what package.json declares — nothing — and reaches no network", () => {
+  // the ecosystem's convention, as the usage page's test states it: the
+  // set of magpie.read names in the page's scripts equals the declared
+  // permissions, and no script has a way out of the frame. This page
+  // declares no permissions: its data is the bundled sample, because
+  // the bridge's reads are a fixed host list with no plugin-private
+  // entry (see the README's page section).
+  expect(pkg.magpie.permissions).toBeUndefined()
+  const reads = new Set()
+  for (const f of readdirSync(page).filter((f) => f.endsWith(".js"))) {
+    const src = read(f)
+    for (const m of src.matchAll(/magpie\.read\(\s*"([^"]+)"/g)) reads.add(m[1])
+    expect(src).not.toMatch(/\bfetch\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource|importScripts/)
+  }
+  expect([...reads]).toEqual([])
+})
+
+test("item 14: every locale the package declares page titles for has a full string table", () => {
+  const keys = Object.keys(V.TEXT.en).sort()
+  expect(Object.keys(pkg.magpie.page.titles).sort()).toEqual(["ja", "zh", "zh-TW"])
+  for (const table of [V.TEXT.ja, V.TEXT["zh-TW"], V.TEXT.zh])
+    expect(Object.keys(table).sort()).toEqual(keys)
+  expect(V.text("ja")).toBe(V.TEXT.ja)
+  expect(V.text("ja-JP")).toBe(V.TEXT.ja)
+  expect(V.text("ja").title).toBe(pkg.magpie.page.titles.ja)
+  expect(V.text("zh-TW")).toBe(V.TEXT["zh-TW"])
+  expect(V.text("zh-HK")).toBe(V.TEXT["zh-TW"]) // Traditional, like the host's title fallback
+  expect(V.text("zh-TW").title).toBe(pkg.magpie.page.titles["zh-TW"])
+  expect(V.text("zh-CN")).toBe(V.TEXT.zh)
+  expect(V.text("zh").title).toBe(pkg.magpie.page.titles.zh)
+  expect(V.text("fr")).toBe(V.TEXT.en)
+  expect(V.detail(project.branches[1].commits[1], "ja").delta).toContain("追加")
+  expect(V.detail(project.branches[1].commits[1], "zh-TW").delta).toContain("新增")
+})
+
+test("item 16: the detail card marks its branch with a dot, and the picker is a menu, not a select", () => {
+  const html = read("index.html")
+  expect(html).not.toContain("<select")
+  expect(html).toContain('id="projBtn"')
+  expect(html).toContain('id="projList"')
+  expect(html).toContain('id="dDot"')
+  expect(read("style.css")).not.toMatch(/border-left:\s*3px/)
+  const app = read("app.js")
+  expect(app).not.toContain("borderLeftColor")
+  expect(app).toContain("dDot")
+  expect(app).toContain('style.background = colorOf')
 })
 
 const C = (id, parent, time, over = {}) => ({

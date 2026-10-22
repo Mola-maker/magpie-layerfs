@@ -4,13 +4,12 @@
 // agent copies no file bytes; a checkpoint stores only what changed.
 // Arguments are JSON Schema, so the package needs no dependency.
 //
-// Backends: the real LayerFS through its JavaScript SDK when configured
-// (LAYERFS_SDK_PATH + LAYERFS_STORE_PATH), otherwise a local content-
-// addressed store with the same model. See layerfs.mjs and the README.
-import { existsSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
-import { checkBranch, checkInnerPath, checkProject, createBackend } from "./layerfs.mjs"
+// Backends: the real LayerFS through its JavaScript SDK — off by
+// default, on only when the user opts in (the plugin's "native"
+// option, or MAGPIE_LAYERFS_NATIVE=1) with LAYERFS_SDK_PATH set, and
+// always behind a child process — otherwise a local content-addressed
+// store with the same model. See layerfs.mjs and the README.
+import { checkBranch, checkInnerPath, checkProject, checkSourceDir, createBackend } from "./layerfs.mjs"
 
 const str = (v, name) => {
   if (typeof v !== "string" || !v) throw new Error(`${name} is a non-empty string`)
@@ -18,27 +17,26 @@ const str = (v, name) => {
 }
 const opt = (v, name, dflt) => (v === undefined || v === "" ? dflt : str(v, name))
 
-// The plugin's page (magpie.page in package.json) replays the worktree
-// trajectory. A page may read no live data — its sandbox allows no fetch —
-// so after every tool call the backend's recorded trajectory is written
-// beside the page as a classic script, and the page animates that. A
-// failure here must never fail the tool call itself.
-const pageDir = join(dirname(fileURLToPath(import.meta.url)), "page")
-async function refreshTrajectory(b) {
-  try {
-    if (typeof b.trajectory !== "function" || !existsSync(pageDir)) return
-    const data = await b.trajectory()
-    writeFileSync(join(pageDir, "trajectory.js"), `globalThis.LayerfsTrajectory = ${JSON.stringify(data)};\n`)
-  } catch { /* the picture is a bonus, never a dependency */ }
-}
-
-export const LayerfsTools = async (ctx = {}) => {
+// The plugin's options: magpie hands a plugin its options (the
+// magpie.options defaults in package.json, as the user set them) as
+// the plugin function's second argument. Two of them are switches
+// only the user may flip, because both widen what these tools can do
+// with the host's rights: "exec" (run shell commands) and "native"
+// (run the LayerFS SDK, in a child process). The MAGPIE_LAYERFS_EXEC /
+// MAGPIE_LAYERFS_NATIVE environment variables are the same switches
+// for hosts that do not pass options.
+export const LayerfsTools = async (ctx = {}, options = {}) => {
   let backendPromise
-  const backend = () => (backendPromise ??= createBackend())
-  const call = async (fn) => {
+  const backend = () => (backendPromise ??= createBackend(process.env, options))
+  const execEnabled = () => options?.exec === true || process.env.MAGPIE_LAYERFS_EXEC === "1"
+  const call = async (fn, project) => {
     const b = await backend()
     const out = await fn(b)
-    await refreshTrajectory(b)
+    // Keep the recorded trajectory current — in the store, scoped to
+    // the project this call touched, never in the package directory
+    // (the page's bundled file is a sample, not a recording surface).
+    // A failure here must never fail the tool call itself.
+    try { await b.refreshTrajectoryFile?.(project) } catch { /* the picture is a bonus, never a dependency */ }
     return out
   }
 
@@ -47,8 +45,10 @@ export const LayerfsTools = async (ctx = {}) => {
       provision: {
         description:
           "Gives the agent a LayerFS workspace for a project branch and answers the filesystem path to work in. " +
-          "The first provision of a project imports the source directory (default: the agent's working directory) as its first checkpoint; " +
-          "later provisions of the same branch answer the same path without copying the tree again. " +
+          "The first provision of a project imports the source directory the caller passes — source is required, there is no default — as its first checkpoint; " +
+          "later provisions of the same branch answer the same path without copying the tree again (source is then ignored). " +
+          "Pass the directory the user chose for this project: magpie's config directory, credential stores (.ssh, .aws, .gnupg), the home directory and the plugin's own store are refused as sources, " +
+          "and secret-shaped files in the tree (.env*, private keys, .git internals) never enter the store — the sim backend skips them on import and reports how many, the native backend refuses an import that holds them. " +
           "Work in the returned path, then save progress with the checkpoint tool. " +
           "Only the returned path is persistent — work anywhere else, including the host's /tmp, is outside LayerFS management; " +
           "the workspace also carries .tmp/ and .cache/ scratch directories (exec points TMPDIR and XDG_CACHE_HOME at them), which checkpoint and publish never capture.",
@@ -57,15 +57,20 @@ export const LayerfsTools = async (ctx = {}) => {
           properties: {
             project: { type: "string", description: "LayerFS project name, e.g. website" },
             branch: { type: "string", description: "branch to work on (default main)" },
-            source: { type: "string", description: "directory to import when the project is first created (default: the agent's working directory)" },
+            source: { type: "string", description: "the directory the user chose for this project; imported when the project is first created, ignored afterwards" },
           },
-          required: ["project"],
+          required: ["project", "source"],
         },
         async execute(args) {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(opt(args.branch, "branch", "main"))
-          const source = args.source === undefined ? ctx.directory : str(args.source, "source")
-          return call((b) => b.provision(project, branch, source))
+          // ctx.directory is magpie's config directory, never a default
+          // source: it holds plugin credentials. It is refused as a
+          // source here (and in the backend) like the other blocked roots.
+          if (args.source === undefined) throw new Error(
+            "source is required: the directory to import when the project is first created — pass the directory the user chose for this project")
+          const source = checkSourceDir(str(args.source, "source"), { configDir: ctx.directory })
+          return call((b) => b.provision(project, branch, source), project)
         },
       },
       checkpoint: {
@@ -85,7 +90,7 @@ export const LayerfsTools = async (ctx = {}) => {
         async execute(args) {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(opt(args.branch, "branch", "main"))
-          return call((b) => b.checkpoint(project, branch, opt(args.message, "message", "")))
+          return call((b) => b.checkpoint(project, branch, opt(args.message, "message", "")), project)
         },
       },
       fork: {
@@ -105,7 +110,7 @@ export const LayerfsTools = async (ctx = {}) => {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(str(args.branch, "branch"))
           const from = checkBranch(opt(args.from, "from", "main"))
-          return call((b) => b.fork(project, branch, from))
+          return call((b) => b.fork(project, branch, from), project)
         },
       },
       publish: {
@@ -125,16 +130,18 @@ export const LayerfsTools = async (ctx = {}) => {
         async execute(args) {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(str(args.branch, "branch"))
-          return call((b) => b.publish(project, branch, { force: args.force === true }))
+          return call((b) => b.publish(project, branch, { force: args.force === true }), project)
         },
       },
       exec: {
         description:
           "Runs a shell command inside a branch's provisioned workspace and checkpoints whatever it changed as one commit: run, test, fix, all captured in the branch's history. " +
+          "DISABLED by default: the command runs with the plugin host's privileges, and magpie serves these tools to remote callers holding a gateway key, so a shell is not something a model key should silently become. " +
+          "It runs only when the user has opted in — the plugin's \"exec\" option set to true, or MAGPIE_LAYERFS_EXEC=1 in the host's environment. " +
           "A command that changes nothing commits nothing. A failing command's changes are still checkpointed (history can be rewound), and its exit code, stdout and stderr are returned. " +
           "Only the workspace path is persistent: the command runs with TMPDIR and XDG_CACHE_HOME redirected into the workspace (.tmp/ and .cache/), " +
           "workspace-local scratch that checkpoint and publish never capture, and files written to the host's real /tmp are likewise outside LayerFS management. " +
-          "The command runs with the plugin host's privileges in the workspace directory; the timeout is capped at 55 seconds, the tools budget.",
+          "The timeout is capped at 55 seconds, the tools budget.",
         args: {
           type: "object",
           properties: {
@@ -147,12 +154,15 @@ export const LayerfsTools = async (ctx = {}) => {
           required: ["project", "command"],
         },
         async execute(args) {
+          if (!execEnabled()) throw new Error(
+            "layerfs_exec is disabled by default: it runs shell commands with the plugin host's privileges, and these tools are reachable by any caller holding a gateway key. " +
+            "To enable it, the user sets the plugin's \"exec\" option to true in magpie's plugin options, or sets MAGPIE_LAYERFS_EXEC=1 in the plugin host's environment, and restarts the host.")
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(opt(args.branch, "branch", "main"))
           const command = str(args.command, "command")
           const message = args.message === undefined ? "" : str(args.message, "message")
           const timeoutMs = args.timeoutMs === undefined ? 50000 : Number(args.timeoutMs) || 50000
-          return call((b) => b.exec(project, branch, command, message, timeoutMs))
+          return call((b) => b.exec(project, branch, command, message, timeoutMs), project)
         },
       },
       history: {
@@ -172,7 +182,7 @@ export const LayerfsTools = async (ctx = {}) => {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(opt(args.branch, "branch", "main"))
           const limit = args.limit === undefined ? 20 : Math.max(1, Math.min(200, Number(args.limit) || 20))
-          return call((b) => b.history(project, branch, limit))
+          return call((b) => b.history(project, branch, limit), project)
         },
       },
       resolve: {
@@ -193,7 +203,7 @@ export const LayerfsTools = async (ctx = {}) => {
           const project = checkProject(str(args.project, "project"))
           const branch = checkBranch(opt(args.branch, "branch", "main"))
           const inner = args.path === undefined || args.path === "" ? "" : checkInnerPath(str(args.path, "path"))
-          return call((b) => b.resolve(project, branch, inner))
+          return call((b) => b.resolve(project, branch, inner), project)
         },
       },
       status: {

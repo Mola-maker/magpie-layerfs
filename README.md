@@ -23,11 +23,11 @@ Served on magpie's MCP server as `layerfs_<tool>`:
 
 | Tool | What it does |
 |---|---|
-| `provision` | Gives the agent a workspace for a project branch and answers the path to work in. The first provision imports the source directory as the project's first checkpoint; later provisions of the same branch answer the same path without copying the tree again. |
+| `provision` | Gives the agent a workspace for a project branch and answers the path to work in. The first provision imports the source directory — a required argument, the directory the user chose for the project — as the project's first checkpoint; later provisions of the same branch answer the same path without copying the tree again. |
 | `checkpoint` | Saves the workspace's state on its branch, storing only the blobs the store has not seen; answers added / modified / deleted counts and the new-bytes vs saved-bytes accounting. |
 | `fork` | Forks a branch for a parallel agent: a pointer at an existing checkpoint, ready immediately, 0 bytes copied. |
 | `publish` | Publishes a branch's head as main's new Layer, so finished work becomes what new work forks from. Guarded: main's head must be in the branch's history, so a publish can only move main forward — if main moved on its own, the publish is refused (a real dsh run lost main's 238 tests to a stale publish; this is that lesson, encoded). `force: true` overwrites deliberately and reports what it replaced. |
-| `exec` | Runs a shell command in a branch's workspace and checkpoints whatever it changed as one commit — the dsh shape, where every bash call is mount, run, commit. A no-change command commits nothing; a failing command's changes are still checkpointed, with its exit code reported. |
+| `exec` | Runs a shell command in a branch's workspace and checkpoints whatever it changed as one commit — the dsh shape, where every bash call is mount, run, commit. A no-change command commits nothing; a failing command's changes are still checkpointed, with its exit code reported. **Disabled by default** (see Safety defaults): it runs only when the user has opted in. |
 | `history` | Lists a branch's checkpoints, newest first, with each one's logical tree size and the bytes it actually stored. |
 | `resolve` | Resolves a project / branch / file to a real filesystem path, its checkpoint and content hash — an O(1) lookup, no copying. |
 | `status` | Backend in use, projects and branches held, and the storage accounting: logical bytes of all checkpoints vs bytes the store occupies. |
@@ -47,38 +47,90 @@ management — if it matters, it belongs in the workspace.
 - **native** — the real LayerFS through its JavaScript SDK
   (`@layerfs/sdk` from a [layerfs](https://github.com/Ephemeral-AI-Lab/layerfs)
   checkout; the SDK is not on npm, and its native binding must be built —
-  `sdk/js/scripts/build-native.mjs`). Set `LAYERFS_SDK_PATH` (the SDK
+  `sdk/js/scripts/build-native.mjs`). **Off by default**: it runs only
+  when the user opts in — the plugin's `"native"` option, or
+  `MAGPIE_LAYERFS_NATIVE=1` — with `LAYERFS_SDK_PATH` set (the SDK
   entry, `sdk/js/src/index.js`); `LAYERFS_STORE_PATH` is optional and
-  only anchors the store volume elsewhere. Adapted and verified against
-  a locally built binding (LayerFS 1.0.0): the SDK's store calls
-  (project / branch / fs) run in-process, so provision materializes a
-  *checkout* of the branch through `fs.list` / `fs.read`, and a
-  checkpoint diffs that checkout and lands as one `fs.apply` commit in
-  the engine's own store, with the engine's chunk-level dedup. Real
-  workspace mounts (`workspace.*`) need a LayerFS deployment (Docker,
-  `LAYERFS_IMAGE`, a daemon) that a magpie host does not provide; where
-  one exists, that is the natural next step. Two engine limits shape
-  this backend, both reported upstream: binary files cannot round-trip
-  through the fs surface (writes accept bytes — `fs.write`, and
-  `fs.apply` since upstream PR #416 — but `fs.read` refuses binary
-  content with code Binary, upstream issue #417, so checkouts and
-  checkpoints name the binary files they cannot move instead of
-  dropping them), and `project.init` refuses a source tree on
-  overlayfs with an opaque `Project(InvalidInput)`.
-- **sim** (default when the SDK is not configured) — a local
-  content-addressed store implementing the same model: immutable blobs
-  named by SHA-256, branches as manifest pointers, checkpoints as
-  deduplicated manifests, under `MAGPIE_LAYERFS_HOME`
-  (default `~/.magpie-layerfs`). It runs anywhere, which is what the tests
-  and the benchmark below use.
+  only anchors the store volume elsewhere. When it runs, **every SDK
+  call happens in a child process** (`native-worker.mjs`, shipped in
+  this package): the plugin host process never imports the SDK and
+  never has `LAYERFS_*` variables written into its shared environment —
+  the worker gets its own. A pinned npm dependency would be tidier,
+  but the SDK is not published to npm, so a version pin does not exist
+  to pin; the opt-in plus the subprocess is the mitigation. Adapted
+  and verified against a locally built binding (LayerFS 1.0.0): the
+  SDK's store calls (project / branch / fs) run in the worker, so
+  provision materializes a *checkout* of the branch through
+  `fs.list` / `fs.read`, and a checkpoint diffs that checkout and
+  lands as one `fs.apply` commit in the engine's own store, with the
+  engine's chunk-level dedup. Real workspace mounts (`workspace.*`)
+  need a LayerFS deployment (Docker, `LAYERFS_IMAGE`, a daemon) that
+  a magpie host does not provide; where one exists, that is the
+  natural next step. Two engine limits shape this backend, both
+  reported upstream: binary files cannot round-trip through the fs
+  surface (writes accept bytes — `fs.write`, and `fs.apply` since
+  upstream PR #416 — but `fs.read` refuses binary content with code
+  Binary, upstream issue #417, so checkouts and checkpoints name the
+  binary files they cannot move instead of dropping them), and
+  `project.init` refuses a source tree on overlayfs with an opaque
+  `Project(InvalidInput)`.
+- **sim** (the default) — a local content-addressed store implementing
+  the same model: immutable blobs named by SHA-256, branches as
+  manifest pointers, checkpoints as deduplicated manifests, under
+  `MAGPIE_LAYERFS_HOME` (default `~/.magpie-layerfs`). It runs
+  anywhere, which is what the tests and the benchmark below use.
 
-`MAGPIE_LAYERFS_BACKEND=auto|native|sim` selects explicitly; `auto` picks
-native when `LAYERFS_SDK_PATH` is set.
+`MAGPIE_LAYERFS_BACKEND=auto|native|sim` selects explicitly; `auto`
+picks native only when the user has opted in *and* `LAYERFS_SDK_PATH`
+is set.
+
+## Safety defaults
+
+magpie serves plugin tools on its MCP server to any caller holding a
+gateway key, and the plugin host runs with the user's rights — so the
+defaults here are set for that room, not for a private library:
+
+- **`provision`'s `source` is required.** There is no default: an
+  earlier version defaulted it to the host's `directory`, which in
+  magpie is the *config* directory (`~/.config/magpie`) — it holds
+  `plugin-auth.json`, every signed-in plugin's token. The config
+  directory, the credential stores (`~/.ssh`, `~/.aws`, `~/.gnupg`),
+  the home directory, the filesystem root, and the plugin's own store
+  are refused as a source — as the source, inside it, or containing
+  it.
+- **Secret-shaped files never enter the store from an import**:
+  `.git`, `.env*`, private keys (`id_rsa`, `id_ed25519`, `*.pem`,
+  `*.key`, …), `.ssh`, `.aws`. The sim backend skips them and reports
+  how many; the native backend's engine imports a tree whole and
+  cannot skip, so it refuses an import that holds them. Imports are
+  also bounded (20,000 files / 512 MiB) and fail loudly past the limit
+  instead of sweeping a disk.
+- **The store is private.** Its root and directories are created
+  `0700`, its record files `0600`, whatever the umask says; a file's
+  own mode is preserved through the sim store (a `0600` file is stored
+  and materialized as `0600`).
+- **`exec` is disabled by default.** It runs a shell with the plugin
+  host's privileges; a model key should not silently become host
+  shell access. The user enables it with the plugin's `"exec"`
+  option (set to `true` in magpie's plugin options) or
+  `MAGPIE_LAYERFS_EXEC=1` in the host's environment.
+- **The native backend is opt-in and subprocess-isolated**, as above.
+- **A checkpoint never deletes what it could not move.** On the
+  native backend, binaries skipped at checkout are absent locally by
+  construction; checkpoints exclude them from the delete set (an
+  earlier version's first checkpoint on such a branch deleted every
+  one of them). The cost: a skipped binary cannot be deleted from a
+  native branch by checkpointing — the fs surface cannot tell
+  "deleted here" from "never materialized here". Likewise, when a
+  native branch has moved since its checkout, re-provisioning keeps
+  the workspace's files and reports `stale: true`, as the sim backend
+  does, instead of wiping the directory.
 
 ## Benchmark
 
-`bun bench/bench.mjs` — a 184-file, 26.8 MB project; 6 parallel agents,
-each keeping 3 checkpoints (sim backend, this machine):
+[`bench/bench.mjs`](https://github.com/Mola-maker/magpie-layerfs/blob/main/bench/bench.mjs)
+(run from a checkout of this repo) — a 184-file, 26.8 MB project; 6
+parallel agents, each keeping 3 checkpoints (sim backend, this machine):
 
 | | naive copies | this plugin |
 |---|---|---|
@@ -87,8 +139,8 @@ each keeping 3 checkpoints (sim backend, this machine):
 | resolve a file path | walk the copy's tree | **138 µs**, with its checkpoint + SHA-256 |
 | total disk for the run | 643.5 MB | **188.1 MB** (store + the 6 live workspaces) |
 
-![test run](docs/assets/tests.png)
-![benchmark](docs/assets/benchmark.png)
+![test run](https://raw.githubusercontent.com/Mola-maker/magpie-layerfs/main/docs/assets/tests.png)
+![benchmark](https://raw.githubusercontent.com/Mola-maker/magpie-layerfs/main/docs/assets/benchmark.png)
 
 Honest limits: a first provision still materializes the tree once, and the
 sim backend rehashes the tree at each checkpoint (the native engine tracks
@@ -97,8 +149,10 @@ per-agent copy, the per-snapshot copy, and the bytes they waste — the
 engine's own benchmarks are at
 [layerfs.ai/benchmarks](https://layerfs.ai/benchmarks/).
 
-Against the real engine (`bun bench/bench-native.mjs`, native backend,
-same scenario, generated-text fixture of 184 files / 27.0 MB): import
+Against the real engine
+([`bench/bench-native.mjs`](https://github.com/Mola-maker/magpie-layerfs/blob/main/bench/bench-native.mjs),
+native backend, same scenario, generated-text fixture of 184 files /
+27.0 MB): import
 3.6 s once; a fork plus its checkout 1.8 s (the branch itself is
 metadata; the checkout pays the file reads); a checkpoint 1.9 s (the
 checkout diff reads the branch back through the fs surface, then one
@@ -135,22 +189,66 @@ draws its own outline and fills in, a publish pops its Layer badge
 easing; with reduced motion preferred, the page simply shows the
 finished picture, every icon fully drawn.
 
-A magpie page may read no live data — its sandbox forbids fetch — so
-after every tool call the plugin writes the recorded trajectory beside
-the page as `page/trajectory.js`, and the page animates that recording.
-Reopen the page to see the newest state. The `trajectory.js` bundled in
-the repository is a labeled sample recorded from the benchmark scenario
-(one project, six agents, three checkpoints each); the first real tool
-call replaces it. The page declares no `magpie.read` permissions: the
-trajectory is the plugin's own record, not magpie's data.
+A magpie page cannot read plugin-private data: its sandbox forbids
+fetch, and the bridge's reads are a fixed host list (`usage:summary`,
+`providers:list`) with no entry a plugin can serve its own data
+through. So the page animates the sample bundled with it —
+`page/trajectory.js`, a labeled recording from the benchmark scenario
+(one project, six agents, three checkpoints each), a package asset
+that nothing rewrites at runtime. The live recording is kept where
+plugin data belongs, in the store: after each tool call the backend
+refreshes `trajectory.json` under `MAGPIE_LAYERFS_HOME` (scoped to the
+project the call touched), and the tools' own results carry the same
+state. The page declares no `magpie.read` permissions, and its test
+asserts it asks for none.
 
 ## Develop
+
+From a checkout of [this repo](https://github.com/Mola-maker/magpie-layerfs)
+(the registry package ships only the runtime files):
 
 ```sh
 bun test                 # the suite (bun:test): tools end to end, plus the page's layout math
 bun bench/bench.mjs      # the benchmark above; writes bench/results.json
-node tools/gen-trajectory.mjs   # regenerate the page's bundled sample trajectory (run it last: the suite's own tool calls refresh page/trajectory.js too, by design)
+node tools/gen-trajectory.mjs   # regenerate the page's bundled sample trajectory
+MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<layerfs checkout>/sdk/js/src/index.js bun test
+                         # the same suite against the real SDK (the native
+                         # backend's logic also runs against a fake SDK —
+                         # fake-sdk.mjs — in the plain suite)
 ```
 
 Zero runtime dependencies; the arguments are JSON Schema, like the other
 tools packages. MIT.
+
+## Changes in 0.7.0
+
+A safety pass over the whole package (prompted by the PR #318 review):
+
+- `provision` requires `source` explicitly and refuses magpie's config
+  directory and the credential stores as sources; imports skip
+  secret-shaped files (sim) or refuse them (native), and are bounded.
+- `exec` is off by default; the user's `"exec"` plugin option or
+  `MAGPIE_LAYERFS_EXEC=1` turns it on.
+- The native backend is off by default (the `"native"` option or
+  `MAGPIE_LAYERFS_NATIVE=1`) and runs entirely in a child process
+  (`native-worker.mjs`); the host process imports no SDK and shares no
+  `LAYERFS_*` environment writes.
+- A native checkpoint no longer deletes binaries it skipped at
+  checkout; re-provisioning a moved native branch reports `stale`
+  instead of wiping the workspace; native publish refuses when the
+  fork point or main's top Layer is unknown.
+- The store and workspaces are `0700`, record files `0600`, and file
+  modes are preserved through the sim store.
+- The recorded trajectory lives in the store (`trajectory.json`),
+  refreshed per affected project; the page's bundled file is a static
+  sample, and running the test suite modifies no package file.
+- **Breaking on-disk change**: branch head files and workspace
+  directories now percent-encode `/` (`feat/x` → `feat%2Fx`), so slash
+  branches and `feat__x` no longer collide and slash branches list
+  correctly. Stores written by 0.6.x keep working for non-slash
+  branches; a slash branch's old head file (`branches/feat/x.json`)
+  and workspace (`feat__x`) are not migrated — re-fork slash branches.
+- The page gained Japanese and Traditional Chinese string tables
+  (matching its declared titles), a magpie-style project menu in
+  place of the native `<select>`, and a branch-colour dot on the
+  detail card in place of the coloured edge.

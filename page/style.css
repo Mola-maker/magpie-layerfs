@@ -53,10 +53,24 @@ header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; borde
   color: var(--muted); margin: 3px 0 0;
 }
 .stamp { color: var(--muted); font-size: 12px; margin: 0 0 0 auto; }
-select {
+/* the project picker, magpie-style: a button that opens a menu of
+   options — its own UI uses no native <select> */
+.menu { position: relative; }
+.menu > button {
   background: var(--card); color: inherit; border: 1px solid var(--line);
-  border-radius: 6px; padding: 4px 8px; font: inherit;
+  border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer;
 }
+.menu-list {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; min-width: 160px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
+}
+.menu-list button {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  border-radius: 6px; padding: 5px 9px; font: inherit; color: inherit; cursor: pointer;
+}
+.menu-list button:hover { background: var(--bg); }
+.menu-list button[aria-selected="true"] { background: var(--accent-soft); }
 
 /* the counters, as tiles in magpie's usage-page idiom */
 .stats { margin: 14px 0 2px; }
@@ -146,10 +160,14 @@ select {
 .seg button[aria-selected="true"] { color: var(--fg); background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, .18); }
 
 .detail {
-  margin-top: 16px; background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--green);
+  margin-top: 16px; background: var(--card); border: 1px solid var(--line);
   border-radius: 10px; padding: 12px 14px; min-height: 74px;
 }
 .d-head { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; font-family: var(--code); }
+.d-branch { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+/* the branch colour rides on a dot, the way magpie's own rows mark a
+   series — not a coloured edge on the card */
+.d-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: transparent; }
 .d-msg { margin: 6px 0 2px; font-weight: 600; font-size: 13.5px; }
 .d-meta { margin: 0; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .d-meta .delta { color: var(--green); font-weight: 600; }

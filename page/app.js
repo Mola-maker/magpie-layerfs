@@ -9,9 +9,12 @@
 // counters count up along the same easing magpie itself uses
 // (--ease, cubic-bezier(.2,.8,.2,1)).
 //
-// The page may read no live data (its sandbox allows no fetch), so the
-// tools write the recorded trajectory beside this page as trajectory.js
-// after every call; reopening the page shows the newest recording.
+// The data is the trajectory bundled with the package (trajectory.js,
+// a labeled sample from the benchmark run). A magpie page cannot read
+// plugin-private data: the bridge's reads are a fixed host list
+// (usage:summary, providers:list), and the sandbox allows no fetch.
+// The live recording the tools keep lives in the store as
+// trajectory.json, next to the store's own data.
 (async () => {
   const V = globalThis.LayerfsView;
   const $ = (id) => document.getElementById(id);
@@ -48,14 +51,39 @@
   }
   $("stamp").textContent = data.sample ? t.sample : `${t.recorded} ${String(data.generatedAt || "").replace("T", " ").slice(0, 19)} · ${data.backend || ""}`;
 
-  const picker = $("project");
+  // the project picker: a magpie-style menu (a button and a listbox),
+  // not a native <select> — magpie's own UI never uses one
+  let currentProject = projects[0].name;
+  const menu = $("projectMenu"), projBtn = $("projBtn"), projList = $("projList");
   for (const p of projects) {
-    const o = document.createElement("option");
-    o.value = p.name; o.textContent = p.name;
-    picker.append(o);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("role", "option");
+    b.dataset.project = p.name;
+    b.textContent = p.name;
+    projList.append(b);
   }
-  picker.hidden = projects.length < 2;
-  picker.addEventListener("change", () => show(picker.value));
+  menu.hidden = projects.length < 2;
+  function paintMenu() {
+    projBtn.textContent = currentProject;
+    projList.querySelectorAll("button").forEach((b) =>
+      b.setAttribute("aria-selected", String(b.dataset.project === currentProject)));
+  }
+  function setMenuOpen(open) {
+    projList.hidden = !open;
+    projBtn.setAttribute("aria-expanded", String(open));
+  }
+  projBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setMenuOpen(projList.hidden);
+  });
+  projList.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-project]");
+    if (!b) return;
+    setMenuOpen(false);
+    if (b.dataset.project !== currentProject) show(b.dataset.project);
+  });
+  document.addEventListener("click", () => setMenuOpen(false));
 
   function el(name, attrs = {}, parent) {
     const e = document.createElementNS(SVG, name);
@@ -374,13 +402,14 @@
     $("dMeta").textContent = d.meta;
     $("dDelta").textContent = d.delta;
     $("dTime").textContent = String(node.commit.time || "").replace("T", " ").slice(0, 19);
-    $("detail").style.borderLeftColor = colorOf(node.branch, node.lane);
+    $("dDot").style.background = colorOf(node.branch, node.lane);
     for (const nd of view.nodes) nd.node._sel = nd.node === node;
     for (const nd of view.nodes) nd.anim.classList.toggle("sel", nd.node === node);
   }
   function clearDetail() {
     $("dBranch").textContent = ""; $("dMsg").textContent = "";
     $("dMeta").textContent = ""; $("dDelta").textContent = ""; $("dTime").textContent = "";
+    $("dDot").style.background = "transparent";
     for (const nd of view.nodes) { nd.node._sel = false; nd.anim.classList.remove("sel"); }
   }
   function isTip(node) {
@@ -389,6 +418,8 @@
 
   function show(name, keep = false) {
     const at = playhead;
+    currentProject = name;
+    paintMenu();
     build(name);
     const n = view.stepsList.length;
     // reduced motion, or a theme change mid-look: settle on the final
@@ -418,7 +449,7 @@
       const dark = !!th.dark;
       if (dark === theme.dark) return;
       theme = { ...theme, dark };
-      show(picker.value, true);
+      show(currentProject, true);
     });
   }
 

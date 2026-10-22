@@ -27,10 +27,39 @@
       dedupe: "去重", graft: "已发布", twig: "未发布的枝条",
       checkpointsK: "检查点", branchesK: "分支",
     },
+    "zh-TW": {
+      title: "LayerFS 軌跡", replay: "重播", pause: "暫停",
+      commits: "個檢查點", stored: "實際儲存", asCopies: "若逐份複製",
+      saved: "去重省下", added: "新增", modified: "修改", deleted: "刪除",
+      files: "個檔案", newBytes: "新增位元組", noData: "還沒有記錄到軌跡。agent 一旦 provision、fork 或 checkpoint，它的路徑就會出現在這裡。",
+      sample: "範例軌跡，來自外掛的基準執行。",
+      recorded: "記錄於", branch: "分支", workspace: "工作區",
+      live: "條存活分支", layers: "層", history: "HISTORY", stats: "store.stats · 唯讀",
+      dedupe: "去重", graft: "已發布", twig: "未發布的枝條",
+      checkpointsK: "檢查點", branchesK: "分支",
+    },
+    ja: {
+      title: "LayerFS の軌跡", replay: "再生", pause: "一時停止",
+      commits: "件のチェックポイント", stored: "実ストレージ", asCopies: "コピー換算",
+      saved: "重複排除で節約", added: "追加", modified: "変更", deleted: "削除",
+      files: "ファイル", newBytes: "新規バイト", noData: "まだ軌跡が記録されていません。エージェントが provision、fork、checkpoint を行うと、その経路がここに表示されます。",
+      sample: "サンプル軌跡（プラグインのベンチマーク実行より）。",
+      recorded: "記録", branch: "ブランチ", workspace: "ワークスペース",
+      live: "本の生存ブランチ", layers: "レイヤー", history: "HISTORY", stats: "store.stats · 読み取り専用",
+      dedupe: "重複排除", graft: "公開済み", twig: "未公開の枝",
+      checkpointsK: "チェックポイント", branchesK: "ブランチ",
+    },
   };
 
+  // The locale the host hands over picks the table, the way the host
+  // resolves page titles: zh-TW / zh-HK / zh-Hant get Traditional,
+  // other zh gets Simplified, ja gets Japanese, the rest English.
   function text(lang) {
-    return String(lang || "").toLowerCase().startsWith("zh") ? TEXT.zh : TEXT.en;
+    const l = String(lang || "").toLowerCase();
+    if (l.startsWith("ja")) return TEXT.ja;
+    if (/^(zh-tw|zh-hk|zh-hant)/.test(l)) return TEXT["zh-TW"];
+    if (l.startsWith("zh")) return TEXT.zh;
+    return TEXT.en;
   }
 
   // The agents magpie drives, in the colours their own products wear, so

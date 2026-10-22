@@ -6,6 +6,7 @@
   "files": [
     "index.mjs",
     "layerfs.mjs",
+    "native-worker.mjs",
     "page",
     "README.md"
   ],
@@ -23,6 +24,10 @@
   ],
   "license": "MIT",
   "magpie": {
+    "options": {
+      "exec": false,
+      "native": false
+    },
     "page": {
       "file": "page/index.html",
       "icon": "page/icon.svg",
@@ -41,5 +46,5 @@
     "url": "git+https://github.com/Mola-maker/magpie-layerfs.git"
   },
   "type": "module",
-  "version": "0.6.0"
+  "version": "0.7.0"
 }

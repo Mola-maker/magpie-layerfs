@@ -1,9 +1,9 @@
 // Produce the page's bundled sample trajectory.js: drive the plugin's
 // own sim backend through the benchmark scenario (one project, six
 // agents, three checkpoints each) in a throwaway store, and write the
-// recorded trajectory next to the page. Inside magpie, the tools
-// overwrite this file with the live recording after every call; the
-// sample is what a fresh install shows first.
+// recorded trajectory next to the page. The bundled file is a static
+// sample — nothing rewrites it at runtime; the live recording lives in
+// the store as trajectory.json (the tools refresh it there).
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"

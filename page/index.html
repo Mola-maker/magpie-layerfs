@@ -16,7 +16,10 @@
     <h1 id="histLine">HISTORY</h1>
     <p class="hist-meta" id="histMeta"></p>
   </div>
-  <select id="project" aria-label="project"></select>
+  <div class="menu" id="projectMenu" hidden>
+    <button type="button" id="projBtn" aria-haspopup="listbox" aria-expanded="false"></button>
+    <div class="menu-list" id="projList" role="listbox" aria-label="project" hidden></div>
+  </div>
   <p class="stamp" id="stamp"></p>
 </header>
 
@@ -48,7 +51,7 @@
 </section>
 
 <section class="detail" id="detail">
-  <div class="d-head"><span id="dBranch"></span><span class="d-time" id="dTime"></span></div>
+  <div class="d-head"><span class="d-branch"><i id="dDot" class="d-dot"></i><span id="dBranch"></span></span><span class="d-time" id="dTime"></span></div>
   <p class="d-msg" id="dMsg"></p>
   <p class="d-meta"><span id="dMeta"></span> <span id="dDelta" class="delta"></span></p>
 </section>
