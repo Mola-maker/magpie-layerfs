@@ -1,0 +1,18 @@
+$ bun test
+bun test v1.4.4 (38afee6c8)
+
+layerfs.test.mjs:
+(pass) gives six tools, each with a JSON Schema and an execute [6.86ms]
+(pass) provision imports the source once, then answers the same path without copying [20.92ms]
+(pass) checkpoint stores only the blobs that changed [5.55ms]
+(pass) fork copies no bytes and shares the history [5.07ms]
+(pass) identical files are stored once (dedup at import) [2.67ms]
+(pass) resolve answers a path and a file's hash without copying [2.92ms]
+(pass) names and paths are validated [3.16ms]
+(pass) backends: sim by default, native requires the SDK env [1.24ms]
+(pass) a workspace file survives on disk where resolve says it is [1.89ms]
+
+ 9 pass
+ 0 fail
+ 59 expect() calls
+Ran 9 tests across 1 file. [743.00ms]

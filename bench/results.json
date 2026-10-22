@@ -1,0 +1,33 @@
+{
+ "fixture": {
+  "files": 184,
+  "treeBytes": 28114944
+ },
+ "agents": 6,
+ "rounds": 3,
+ "naive": {
+  "copyMs": 1927.569474,
+  "snapshotMs": 1715.4579210000002,
+  "totalBytes": 674758656
+ },
+ "plugin": {
+  "importMs": 1589.2881020000004,
+  "forkMs": 5.314055999999255,
+  "provisionMs": 480.12897200000043,
+  "checkpointMs": 6672.185718000001,
+  "storeBytes": 28557312,
+  "logicalBytes": 534183936,
+  "workspaceBytes": 168690141,
+  "dedupRatio": 18.71,
+  "resolveUs": 137.68834700000116
+ },
+ "paths": [
+  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--main",
+  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-1",
+  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-2",
+  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-3",
+  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-4",
+  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-5"
+ ],
+ "when": "2026-10-22T11:28:01.655Z"
+}

@@ -1,0 +1,30 @@
+$ bun bench/bench.mjs
+fixture tree: 184 files, 26.8 MB
+scenario: 6 parallel agents, each keeps 3 checkpoints of its work
+
+paths the agents worked in:
+  agent-0: /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--main
+  agent-1: /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-1
+  agent-2: /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-2
+  agent-3: /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-3
+  agent-4: /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-4
+  agent-5: /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-5
+
+give 6 agents a working tree
+  naive : 1928 ms / 160.9 MB copied
+  plugin: 2075 ms (1 import + 5 forks + 6 provisions)
+fork one more agent's branch
+  naive : 321 ms / 26.8 MB per copy
+  plugin: ~1.06 ms / 0 bytes copied
+keep 18 checkpoints of history
+  naive : 1715 ms / 482.6 MB of snapshots
+  plugin: 6672 ms / store holds 27.2 MB for 509.4 MB of checkpoints
+resolve src/mod-33.txt on agent-3
+  naive : walk the copy's tree to find it
+  plugin: 138 µs -> /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-3/src/mod-33.txt
+
+TOTAL disk: naive 643.5 MB  vs  plugin 188.1 MB (store 27.2 MB + live workspaces 160.9 MB)
+history cost: naive keeps 18 full snapshots; the store keeps every checkpoint of every branch in 27.2 MB — dedup ratio 18.71x over 509.4 MB of logical checkpoints
+sample checkpoint accounting: {"added":0,"modified":1,"newBytes":24576,"logicalBytes":28114944}
+
+wrote bench/results.json
