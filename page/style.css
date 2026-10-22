@@ -94,10 +94,20 @@ select {
 #graph .seg.split-seg { stroke-width: 3.2; }
 #graph .graft { fill: none; stroke-width: 3.4; stroke-linecap: round; stroke-dasharray: 1; }
 #graph .node { transform-box: fill-box; transform-origin: center; cursor: pointer; }
-#graph .halo { opacity: .16; }
-#graph .leaf-core { fill: var(--bg); }
-#graph .node.landing .leaf { stroke: var(--fg); stroke-width: 1.5; }
-#graph .node.sel .leaf { stroke: var(--fg); stroke-width: 1.8; }
+#graph .badge-disc { opacity: .22; }
+#graph .badge-ring { stroke-width: 1.8; opacity: .9; }
+#graph .node.landing .badge-ring { stroke: var(--fg); stroke-width: 2.2; }
+#graph .node.sel .badge-ring { stroke: var(--fg); stroke-width: 2.6; }
+/* the badge's face: the agent's icon, its outline drawn by dashoffset
+   (pathLength is 1, so a dash of 1 is the whole outline) and its fill
+   faded in by the renderer; a monogram sits in the same badge when
+   the agent has no glyph */
+#graph .glyph { overflow: visible; }
+#graph .glyph-path { stroke-dasharray: 1; stroke-linejoin: round; stroke-linecap: round; }
+#graph .glyph-mark {
+  font-family: var(--code); font-size: 9px; font-weight: 700; text-anchor: middle;
+}
+.legend-icon { flex: none; display: inline-block; }
 #graph .ring { pointer-events: none; }
 #graph .badge-pop { transform-box: fill-box; transform-origin: center; }
 #graph .badge-fill { fill: var(--accent); }

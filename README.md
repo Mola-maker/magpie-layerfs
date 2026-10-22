@@ -112,15 +112,16 @@ read the two ratios as the ends of a range, not a single number.
 The package also declares a magpie page, **LayerFS trajectory**
 (轨迹), which replays how the agents' worktrees grew, drawn the way
 LayerFS's own History picture draws them: main is the green middle
-bough, each branch a bough of its own, a checkpoint a leaf, a fork a
-split, and a publish a graft back onto main that adds a Layer band
-(L0, L1, …). Two running totals carry the argument — what those
-checkpoints would have cost as plain copies against what the
-deduplicated store actually wrote, with a store.stats line in
-LayerFS's own accounting words. Play it, scrub it, click a leaf for
-its checkpoint's message and byte split, or click a branch's name tag
-to focus that branch alone: that is what the plugin does for an
-agent's edits, made visible.
+bough, each branch a bough of its own, a checkpoint a badge bearing
+its agent's own icon — the marks magpie itself ships for them, in
+that agent's colour — a fork a split, and a publish a graft back
+onto main that adds a Layer band (L0, L1, …). Two running totals
+carry the argument — what those checkpoints would have cost as
+plain copies against what the deduplicated store actually wrote,
+with a store.stats line in LayerFS's own accounting words. Play it,
+scrub it, click a badge for its checkpoint's message and byte
+split, or click a branch's name tag to focus that branch alone:
+that is what the plugin does for an agent's edits, made visible.
 
 The page is drawn in magpie's own design language and built the way
 magpie builds pages — plain HTML, CSS and scripts, no build step and
@@ -128,10 +129,11 @@ no dependencies, styled by the host's `--magpie-*` theme tokens with
 its tiles, seg controls and indigo accent. The replay runs on
 requestAnimationFrame through magpie's own `--ease` curve
 (cubic-bezier(.2,.8,.2,1)): the boughs draw themselves as the
-playhead passes, each leaf lands with a pulse, a publish pops its
-Layer badge (L1, L2, …) onto main, and the stat tiles count up with
-the same easing; with reduced motion preferred, the page simply
-shows the finished picture.
+playhead passes, each badge lands with a pulse while its icon
+draws its own outline and fills in, a publish pops its Layer badge
+(L1, L2, …) onto main, and the stat tiles count up with the same
+easing; with reduced motion preferred, the page simply shows the
+finished picture, every icon fully drawn.
 
 A magpie page may read no live data — its sandbox forbids fetch — so
 after every tool call the plugin writes the recorded trajectory beside

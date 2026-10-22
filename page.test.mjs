@@ -193,6 +193,81 @@ test("a monogram's ink reads on its agent's colour", () => {
   expect(V.markInk("not-a-color")).toBe("#101410")
 })
 
+test("every agent has a drawable icon in the registry", () => {
+  expect(Object.keys(V.ICONS).sort()).toEqual(Object.keys(V.AGENTS).sort())
+  for (const [id, icon] of Object.entries(V.ICONS)) {
+    const box = icon.viewBox.split(/\s+/).map(Number)
+    expect(box.length).toBe(4)
+    expect(box.every((n) => Number.isFinite(n))).toBe(true)
+    expect(icon.paths.length).toBeGreaterThanOrEqual(1)
+    for (const p of icon.paths) {
+      expect(p.d.startsWith("M")).toBe(true)
+      expect(p.d.length).toBeGreaterThanOrEqual(20)
+    }
+  }
+})
+
+test("a checkpoint badge carries its agent's icon, else a monogram, else the leaf", () => {
+  const g = V.glyphFor("claude-fix")
+  expect(g.type).toBe("icon")
+  expect(g.agent.id).toBe("claude")
+  // the geometry the renderer puts in the node is the registry's own
+  expect(g.icon).toBe(V.ICONS.claude)
+  expect(g.icon.paths[0].d).toContain("M4.709 15.955") // claude's starburst, as magpie ships it
+  expect(V.glyphFor("pi").icon.paths.length).toBe(2) // pi's two block paths
+  expect(V.glyphFor("main").type).toBe("leaf") // no agent on main's bough
+  expect(V.glyphFor("release").type).toBe("leaf")
+  expect(V.glyphFor("release").glyph).toBe(V.LEAF_GLYPH)
+  // an agent whose glyph goes missing falls back to its monogram
+  const saved = V.ICONS.grok
+  delete V.ICONS.grok
+  const fb = V.glyphFor("grok")
+  expect(fb.type).toBe("mark")
+  expect(fb.agent.mark).toBe("Gk")
+  V.ICONS.grok = saved
+  expect(V.glyphFor("grok").type).toBe("icon")
+})
+
+test("an icon draws itself as its step lands, then its fill fades in", () => {
+  const d0 = V.iconDraw(0, false)
+  expect(d0.offset).toBe(1) // nothing of the outline yet
+  expect(d0.fillOpacity).toBe(0)
+  const dMid = V.iconDraw(0.36, false)
+  expect(dMid.offset).toBeCloseTo(0.5)
+  expect(dMid.fillOpacity).toBe(0) // the fill waits for the outline
+  const dLate = V.iconDraw(0.75, false)
+  expect(dLate.offset).toBe(0) // outline complete before the step ends
+  expect(dLate.fillOpacity).toBeCloseTo(0.5)
+  const d1 = V.iconDraw(1, false)
+  expect(d1.offset).toBe(0)
+  expect(d1.fillOpacity).toBe(1)
+  expect(d1.strokeOpacity).toBeCloseTo(0.45) // a soft outline lingers
+  // neither measure ever runs backwards as progress grows
+  let lastOff = 1, lastFill = 0
+  for (let p = 0; p <= 1.001; p += 0.1) {
+    const d = V.iconDraw(Math.min(1, p), false)
+    expect(d.offset).toBeLessThanOrEqual(lastOff)
+    expect(d.fillOpacity).toBeGreaterThanOrEqual(lastFill)
+    lastOff = d.offset; lastFill = d.fillOpacity
+  }
+})
+
+test("reduced motion renders every icon fully drawn at any progress", () => {
+  for (const p of [0, 0.2, 0.63, 1]) {
+    const d = V.iconDraw(p, true)
+    expect(d.offset).toBe(0)
+    expect(d.fillOpacity).toBe(1)
+  }
+  // and the page wires the model in: badges, glyphs, no leaf nodes left
+  const app = read("app.js")
+  expect(app).toContain("glyphFor")
+  expect(app).toContain("iconDraw")
+  expect(app).toContain("badge-disc")
+  expect(app).not.toContain("leaf-core")
+  expect(app).not.toContain("LEAF")
+  expect(read("style.css")).toContain(".glyph-path")
+})
+
 test("a checkpoint's detail line carries its delta and byte split", () => {
   const d = V.detail(project.branches[1].commits[1], "en")
   expect(d.meta).toContain("10 files")

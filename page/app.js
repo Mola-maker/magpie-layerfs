@@ -1,11 +1,13 @@
 // The trajectory page, drawn the way LayerFS's own History picture is:
 // main is the green middle bough, every other branch a bough that splits
-// off it, a checkpoint a leaf on its bough, and a publish a graft back
-// onto main that lands a Layer badge. The replay is one continuous
+// off it, a checkpoint a badge on its bough bearing its agent's own
+// icon (the marks magpie itself ships for them), and a publish a graft
+// back onto main that lands a Layer badge. The replay is one continuous
 // timeline, driven by requestAnimationFrame through the pure motion
 // model in view.js: boughs draw themselves as the playhead passes,
-// leaves land with a pulse, and the counters count up along the same
-// easing magpie itself uses (--ease, cubic-bezier(.2,.8,.2,1)).
+// badges land with a pulse while their icons draw themselves, and the
+// counters count up along the same easing magpie itself uses
+// (--ease, cubic-bezier(.2,.8,.2,1)).
 //
 // The page may read no live data (its sandbox allows no fetch), so the
 // tools write the recorded trajectory beside this page as trajectory.js
@@ -61,7 +63,6 @@
     if (parent) parent.append(e);
     return e;
   }
-  const LEAF = "M 0 -10 C 8 -6, 10 4, 0 11 C -10 4, -8 -6, 0 -10 Z";
   const seg = (a, b) => {
     const mx = (a.x + b.x) / 2;
     return `M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}`;
@@ -145,20 +146,45 @@
     }
     // checkpoints: a positioned group (attribute transform) around an
     // animated group (style transform), so the two never fight; the
-    // ring is the landing pulse
+    // loose ring is the landing pulse. The badge itself is a soft disc
+    // in the branch's colour, ringed in it, and its face is the icon
+    // of the agent that owns the branch — drawn in the ink that reads
+    // on that colour — or the agent's monogram when it has no glyph,
+    // or LayerFS's leaf when the bough names no agent at all
     for (const n of all) {
       const g = el("g", { class: "lane", "data-branch": n.branch }, svg);
       const pos = el("g", { transform: `translate(${n.x} ${n.y})` }, g);
+      const color = colorOf(n.branch, n.lane);
       const ring = el("circle", {
-        r: 9, class: "ring", fill: "none",
-        stroke: colorOf(n.branch, n.lane), "stroke-width": 2, opacity: 0,
+        r: 13, class: "ring", fill: "none",
+        stroke: color, "stroke-width": 2, opacity: 0,
       }, pos);
       const anim = el("g", { class: "node" + (n.landing ? " landing" : ""), "data-branch": n.branch }, pos);
-      el("circle", { r: 8.5, class: "halo", fill: colorOf(n.branch, n.lane) }, anim);
-      el("path", { d: LEAF, class: "leaf", fill: colorOf(n.branch, n.lane), transform: "rotate(32) scale(1.35)" }, anim);
-      el("circle", { r: 2.1, class: "leaf-core" }, anim);
+      el("circle", { r: 12.5, class: "badge-disc", fill: color }, anim);
+      el("circle", { r: 12.5, class: "badge-ring", fill: "none", stroke: color }, anim);
+      const face = V.glyphFor(n.branch);
+      const ink = V.markInk(color);
+      const glyphPaths = [];
+      let glyphMark = null;
+      if (face.type === "mark") {
+        glyphMark = el("text", { y: 3.4, class: "glyph-mark", fill: ink }, anim);
+        glyphMark.textContent = face.agent.mark;
+      } else {
+        const glyph = face.type === "icon" ? face.icon : face.glyph;
+        const inner = el("svg", {
+          x: -8, y: -8, width: 16, height: 16, viewBox: glyph.viewBox, class: "glyph",
+        }, anim);
+        for (const p of glyph.paths) {
+          const attrs = {
+            d: p.d, class: "glyph-path", pathLength: 1,
+            fill: ink, stroke: ink, "stroke-width": glyph.sw || 1.3,
+          };
+          if (p.rule) attrs["fill-rule"] = p.rule;
+          glyphPaths.push(el("path", attrs, inner));
+        }
+      }
       anim.addEventListener("click", () => { pinned = true; pause(); select(n); });
-      view.nodes.push({ anim, ring, step: n.step, node: n });
+      view.nodes.push({ anim, ring, step: n.step, node: n, glyphPaths, glyphMark });
     }
     // name tags at each branch's first own leaf; main needs none — the
     // HISTORY line and the Layer bands name it. An agent's branch gets
@@ -192,9 +218,21 @@
     for (const a of seen.values()) {
       const item = document.createElement("span");
       item.className = "legend-item";
-      const dot = document.createElement("i");
-      dot.style.background = a.color;
-      item.append(dot, document.createTextNode(a.name));
+      const icon = V.ICONS[a.id];
+      if (icon) {
+        const mini = el("svg", { width: 14, height: 14, viewBox: icon.viewBox, class: "legend-icon" });
+        for (const p of icon.paths) {
+          const attrs = { d: p.d, fill: a.color };
+          if (p.rule) attrs["fill-rule"] = p.rule;
+          el("path", attrs, mini);
+        }
+        item.append(mini);
+      } else {
+        const dot = document.createElement("i");
+        dot.style.background = a.color;
+        item.append(dot);
+      }
+      item.append(document.createTextNode(a.name));
       legend.append(item);
     }
     legend.hidden = seen.size === 0;
@@ -246,6 +284,16 @@
       nd.anim.style.opacity = String(p);
       nd.anim.style.transform = `scale(${0.35 + 0.65 * p}) rotate(${-14 * (1 - p)}deg)`;
       nd.anim.classList.toggle("sel", !!nd.node._sel);
+      // as the badge lands, its icon draws itself and then its fill
+      // fades in; under reduced motion the icon is simply there,
+      // fully drawn at any point of the scrub
+      const d = V.iconDraw(p, RM);
+      for (const gp of nd.glyphPaths) {
+        gp.style.strokeDashoffset = String(d.offset);
+        gp.style.fillOpacity = String(d.fillOpacity);
+        gp.style.strokeOpacity = String(d.strokeOpacity);
+      }
+      if (nd.glyphMark) nd.glyphMark.style.opacity = String(d.fillOpacity);
     }
     // the counters count up along the same frame
     const total = stepsList[n - 1];
@@ -278,7 +326,7 @@
       for (const nd of view.nodes) {
         if (nd.step !== step) continue;
         if (!s) { nd.ring.setAttribute("opacity", 0); continue; }
-        nd.ring.setAttribute("r", (nd.node.landing ? 13 : 9) * s.scale);
+        nd.ring.setAttribute("r", (nd.node.landing ? 17 : 13) * s.scale);
         nd.ring.setAttribute("opacity", s.opacity);
       }
       if (!s) pulses.delete(step);
