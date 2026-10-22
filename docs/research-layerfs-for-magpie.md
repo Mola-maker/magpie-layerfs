@@ -139,12 +139,17 @@ binding and its real SDK shapes. What the adaptation established:
   writes to it directly). The plugin's publish guard is expressed in
   Layer terms: the branch's forkedFrom must equal main's current top
   Layer, or the publish needs force.
-- The fs surface is text-only in practice: fs.read refuses binary
-  files (code Binary), and no JavaScript value (Buffer, Uint8Array,
-  ArrayBuffer, number[]) reaches the binding as bytes for
-  fs.write/fs.apply, despite write.js advertising a bytes form.
-  Binary content enters a project only via project.init's import.
-  Reported upstream.
+- Binary files cannot round-trip through the fs surface: fs.read
+  refuses them (code Binary; read-back tracked upstream as issue
+  #417), while writes do accept bytes — fs.write reshapes any
+  non-string content into a bytes form, and fs.apply accepts a
+  `bytes` field per change (its `content` key refused every
+  non-string form until upstream PR #416 fixed the wrapper).
+  Correction to the first probe report (issue #413): fs.write with
+  Buffer/Uint8Array worked all along; only fs.apply's content key
+  and the bare-ArrayBuffer/number[] forms failed. Binaries can be
+  committed but never read back, so in practice they still enter a
+  project via project.init's import.
 - project.init refuses a source tree on overlayfs with
   Failed/Project(InvalidInput) and detail null; the same tree imports
   from tmpfs. Reported upstream with a minimal repro.

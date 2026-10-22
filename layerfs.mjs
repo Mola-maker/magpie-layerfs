@@ -462,12 +462,17 @@ export class SimBackend {
 //   diffs that directory against the branch and lands the changes as ONE
 //   fs.apply commit — the same shape as a workspace commit, through the
 //   store surface.
-// - The fs surface is text-only in practice: fs.read refuses binary files
-//   (error code Binary) and no JavaScript value reaches the binding as
-//   bytes for fs.write/fs.apply, so binary files enter a project only via
-//   the initial import. A checkout lists the binary files it could not
-//   materialize, and a checkpoint lists the binary files it could not
-//   commit, instead of silently dropping them.
+// - Binary files cannot round-trip through the fs surface: fs.write and
+//   fs.apply accept bytes (Buffer/Uint8Array; fs.apply's refusal of
+//   non-string content was fixed upstream in layerfs PR #416), but
+//   fs.read still refuses binary content (error code Binary; upstream
+//   issue #417), so a checkout cannot materialize binaries and a
+//   checkpoint cannot diff them. This backend therefore still skips
+//   binary files on the native path, pending #417: a checkout lists the
+//   binary files it could not materialize, and a checkpoint lists the
+//   binary files it could not commit, instead of silently dropping
+//   them. Binaries that must enter a project arrive via the initial
+//   import.
 // - One process holds one open store per project name (refcounted by
 //   the binding; the last client closes it), and a client captures
 //   LAYERFS_HOME and its storePath at construction — so one backend
@@ -714,7 +719,8 @@ export class NativeBackend {
       const buf = readFileSync(join(dir, ...rel.split("/")))
       const r = remoteFiles.get(rel)
       if (!isTextBuf(buf)) {
-        // binary content cannot be written through the fs surface; an
+        // binary content cannot be read back through the fs surface
+        // (code Binary, upstream #417), so it cannot be diffed; an
         // unchanged size against a store copy counts as unchanged
         if (!r || r.size !== f.size) skippedBinary.push(rel)
         continue

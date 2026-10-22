@@ -3,9 +3,10 @@
 //     bun bench/bench-native.mjs
 //
 // Same scenario as bench.mjs (one import, 6 agent forks, 3 checkpoint
-// rounds each) but with a text fixture: the SDK's fs surface is
-// text-only, so checkout-mode checkpoints are a text workflow (binary
-// files enter a project only through the import). The imported source
+// rounds each) but with a text fixture: checkout-mode checkpoints are
+// a text workflow because fs.read refuses binary content (code
+// Binary, upstream #417) — binaries can be written but never read
+// back or diffed. The imported source
 // sits on tmpfs because the engine refuses an overlayfs source
 // (Project(InvalidInput), reported upstream); the store volume sits on
 // the working disk, as it must (ext4/xfs/btrfs only). Writes

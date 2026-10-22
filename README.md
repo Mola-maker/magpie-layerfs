@@ -48,11 +48,13 @@ Served on magpie's MCP server as `layerfs_<tool>`:
   workspace mounts (`workspace.*`) need a LayerFS deployment (Docker,
   `LAYERFS_IMAGE`, a daemon) that a magpie host does not provide; where
   one exists, that is the natural next step. Two engine limits shape
-  this backend, both reported upstream: the fs surface is text-only in
-  practice (binary files enter a project through the initial import,
-  and checkouts/checkpoints name the binary files they cannot move
-  instead of dropping them), and `project.init` refuses a source tree
-  on overlayfs with an opaque `Project(InvalidInput)`.
+  this backend, both reported upstream: binary files cannot round-trip
+  through the fs surface (writes accept bytes — `fs.write`, and
+  `fs.apply` since upstream PR #416 — but `fs.read` refuses binary
+  content with code Binary, upstream issue #417, so checkouts and
+  checkpoints name the binary files they cannot move instead of
+  dropping them), and `project.init` refuses a source tree on
+  overlayfs with an opaque `Project(InvalidInput)`.
 - **sim** (default when the SDK is not configured) — a local
   content-addressed store implementing the same model: immutable blobs
   named by SHA-256, branches as manifest pointers, checkpoints as
