@@ -1,0 +1,7 @@
+✓ added /tmp/mc-plugins/packages/layerfs
+/tmp/mc-plugins/packages/layerfs  on
+  tools  layerfs_checkpoint, layerfs_exec, layerfs_fork, layerfs_history, layerfs_provision, layerfs_publish, layerfs_resolve, layerfs_status
+  page  LayerFS trajectory (reads nothing)
+/tmp/mc-plugins/packages/layerfs  on
+  tools  layerfs_checkpoint, layerfs_exec, layerfs_fork, layerfs_history, layerfs_provision, layerfs_publish, layerfs_resolve, layerfs_status
+  page  LayerFS trajectory (reads nothing)

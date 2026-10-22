@@ -1,0 +1,16 @@
+{
+ "fixture": {
+  "files": 184,
+  "treeBytes": 28311552,
+  "kind": "text"
+ },
+ "importMs": 3028.953685,
+ "forkMs": 2018.7949185,
+ "checkpointMs": 2159.9439307777775,
+ "storeBytes": 5836800,
+ "logicalTotal": 537919488,
+ "engine": {
+  "logicalBytes": 509607936,
+  "storedBytes": 622955
+ }
+}

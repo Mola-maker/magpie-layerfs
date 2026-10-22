@@ -1,4 +1,4 @@
-$ bun bench/bench.mjs
+$ bun bench/bench.mjs  (sim backend)
 fixture tree: 184 files, 26.8 MB
 scenario: 6 parallel agents, each keeps 3 checkpoints of its work
 
@@ -11,20 +11,32 @@ paths the agents worked in:
   agent-5: /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-5
 
 give 6 agents a working tree
-  naive : 1928 ms / 160.9 MB copied
-  plugin: 2075 ms (1 import + 5 forks + 6 provisions)
+  naive : 1980 ms / 160.9 MB copied
+  plugin: 1542 ms (1 import + 5 forks + 6 provisions)
 fork one more agent's branch
-  naive : 321 ms / 26.8 MB per copy
-  plugin: ~1.06 ms / 0 bytes copied
+  naive : 330 ms / 26.8 MB per copy
+  plugin: ~0.56 ms / 0 bytes copied
 keep 18 checkpoints of history
-  naive : 1715 ms / 482.6 MB of snapshots
-  plugin: 6672 ms / store holds 27.2 MB for 509.4 MB of checkpoints
+  naive : 1922 ms / 482.6 MB of snapshots
+  plugin: 6679 ms / store holds 27.2 MB for 509.4 MB of checkpoints
 resolve src/mod-33.txt on agent-3
   naive : walk the copy's tree to find it
-  plugin: 138 µs -> /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-3/src/mod-33.txt
+  plugin: 145 µs -> /home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-3/src/mod-33.txt
 
 TOTAL disk: naive 643.5 MB  vs  plugin 188.1 MB (store 27.2 MB + live workspaces 160.9 MB)
 history cost: naive keeps 18 full snapshots; the store keeps every checkpoint of every branch in 27.2 MB — dedup ratio 18.71x over 509.4 MB of logical checkpoints
 sample checkpoint accounting: {"added":0,"modified":1,"newBytes":24576,"logicalBytes":28114944}
 
 wrote bench/results.json
+
+$ bun bench/bench-native.mjs  (native backend, real LayerFS engine)
+fixture tree: 184 text files, 27.0 MB
+scenario: import once, 6 agent forks, 3 checkpoints each
+
+import (project.init)      3029 ms
+fork (branch + checkout)   2019 ms avg
+checkpoint (diff + apply)  2160 ms avg
+store file on disk         5.6 MB for 513.0 MB logical (92.2x)
+engine commit accounting   logical 486.0 MB / stored 0.6 MB across branch commits
+
+wrote bench/results/native.json

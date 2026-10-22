@@ -1,18 +1,33 @@
-$ bun test
+$ bun test  (with MAGPIE_LAYERFS_NATIVE_TEST=1 against a real LayerFS store)
 bun test v1.4.4 (38afee6c8)
 
 layerfs.test.mjs:
-(pass) gives six tools, each with a JSON Schema and an execute [6.86ms]
-(pass) provision imports the source once, then answers the same path without copying [20.92ms]
-(pass) checkpoint stores only the blobs that changed [5.55ms]
-(pass) fork copies no bytes and shares the history [5.07ms]
-(pass) identical files are stored once (dedup at import) [2.67ms]
-(pass) resolve answers a path and a file's hash without copying [2.92ms]
-(pass) names and paths are validated [3.16ms]
-(pass) backends: sim by default, native requires the SDK env [1.24ms]
-(pass) a workspace file survives on disk where resolve says it is [1.89ms]
+(pass) gives eight tools, each with a JSON Schema and an execute [0.80ms]
+(pass) provision imports the source once, then answers the same path without copying [13.95ms]
+(pass) checkpoint stores only the blobs that changed [13.96ms]
+(pass) fork copies no bytes and shares the history [11.64ms]
+(pass) identical files are stored once (dedup at import) [4.79ms]
+(pass) resolve answers a path and a file's hash without copying [7.26ms]
+(pass) names and paths are validated [5.89ms]
+(pass) backends: sim by default, native requires the SDK env [5.89ms]
+(pass) a workspace file survives on disk where resolve says it is [5.52ms]
+(pass) publish moves main forward to the branch head, as a numbered Layer [17.32ms]
+(pass) publish refuses to drop a main that moved, unless forced [14.93ms]
+(pass) exec runs in the workspace and checkpoints what changed [71.18ms]
+(pass) native: provision imports, fork and checkpoint commit through the real store [179.73ms]
+(pass) native: publish appends a Layer, and the trajectory replays it [242.30ms]
 
- 9 pass
+page.test.mjs:
+(pass) the package declares the page magpie shows [0.40ms]
+(pass) lanes put main first, then branches by first checkpoint [13.81ms]
+(pass) steps are time-ordered and accumulate both curves [0.33ms]
+(pass) layout links each checkpoint to its parent, across lanes on a fork [0.80ms]
+(pass) a publish grafts its branch back onto main and adds a Layer band [0.27ms]
+(pass) a branch's spine grows out of its fork point on the parent's lane [0.27ms]
+(pass) branches name their agent by token, in that agent's colour [0.26ms]
+(pass) a checkpoint's detail line carries its delta and byte split [0.23ms]
+
+ 22 pass
  0 fail
- 59 expect() calls
-Ran 9 tests across 1 file. [743.00ms]
+ 163 expect() calls
+Ran 22 tests across 2 files. [704.00ms]
