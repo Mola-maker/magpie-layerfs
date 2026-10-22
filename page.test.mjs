@@ -114,6 +114,85 @@ test("branches name their agent by token, in that agent's colour", () => {
   expect(V.agentOf("agent-1")).toBeNull()
 })
 
+test("the page's stat tiles and speed seg are in the markup, magpie-style", () => {
+  const html = read("index.html")
+  expect(html).toContain('class="tiles"')
+  for (const id of ["nCommits", "tBranches", "vCopies", "vStored", "tDedup", "vSaved"])
+    expect(html).toContain(`id="${id}"`)
+  expect(html).toContain('id="speed"')
+  expect(html).toContain('data-speed="0.5"')
+  expect(html).toContain('data-speed="4"')
+  expect(html).not.toContain('<select id="speed"') // a seg control, not a select
+  expect(html).toContain('max="1000"') // the scrub is smooth, not per-step
+})
+
+test("magpie's easing curve starts and ends true and stays monotonic", () => {
+  const e = V.magpieEase // cubic-bezier(.2,.8,.2,1), magpie's --ease token
+  expect(e(0)).toBe(0)
+  expect(e(1)).toBe(1)
+  expect(e(-1)).toBe(0)
+  expect(e(2)).toBe(1)
+  let prev = 0
+  for (let x = 0.05; x < 1; x += 0.05) {
+    expect(e(x)).toBeGreaterThan(prev)
+    prev = e(x)
+  }
+  expect(e(0.5)).toBeGreaterThan(0.8) // the curve leans out early
+  expect(V.easeOutCubic(0)).toBe(0)
+  expect(V.easeOutCubic(1)).toBe(1)
+  expect(V.easeOutBack(0)).toBeCloseTo(0)
+  expect(V.easeOutBack(1)).toBe(1)
+  expect(V.easeOutBack(0.7)).toBeGreaterThan(1) // the badge pop overshoots
+})
+
+test("a frame at playhead t eases each step in and interpolates the counters", () => {
+  const s = V.steps(project) // cumStored 1000,1100,1200,1300,1400; cumLogical 1000..5000
+  const f0 = V.frame(s, 0)
+  expect(f0.progress).toEqual([0, 0, 0, 0, 0])
+  expect(f0.logical).toBe(0)
+  expect(f0.landed).toBe(0)
+  const fEnd = V.frame(s, 5)
+  expect(fEnd.progress).toEqual([1, 1, 1, 1, 1])
+  expect(fEnd.logical).toBe(5000)
+  expect(fEnd.stored).toBe(1400)
+  expect(fEnd.landed).toBe(5)
+  expect(fEnd.branches).toBe(3)
+  const fMid = V.frame(s, 2.5) // third step half-way through its stretch
+  expect(fMid.landed).toBe(2)
+  expect(fMid.progress[2]).toBeGreaterThan(0)
+  expect(fMid.progress[2]).toBeLessThan(1)
+  expect(fMid.logical).toBeGreaterThan(2000)
+  expect(fMid.logical).toBeLessThan(3000)
+  expect(fMid.branches).toBe(1) // only main's two checkpoints have landed
+  // and the counters never run backwards as t grows
+  let last = 0
+  for (let tt = 0; tt <= 5; tt += 0.25) {
+    expect(V.frame(s, tt).logical).toBeGreaterThanOrEqual(last)
+    last = V.frame(s, tt).logical
+  }
+  expect(V.frame(s, 99).landed).toBe(5) // clamped past the end
+  expect(V.frame(s, -1).landed).toBe(0)
+})
+
+test("a landing pulse swells and thins, then is spent", () => {
+  const p0 = V.pulse(0)
+  expect(p0.opacity).toBeCloseTo(0.85)
+  const pMid = V.pulse(0.5)
+  expect(pMid.scale).toBeGreaterThan(p0.scale)
+  expect(pMid.opacity).toBeLessThan(p0.opacity)
+  expect(V.pulse(1).opacity).toBe(0)
+  expect(V.pulse(1.5)).toBeNull()
+  expect(V.pulse(-0.1)).toBeNull()
+})
+
+test("a monogram's ink reads on its agent's colour", () => {
+  expect(V.markInk("#e7e5e4")).toBe("#101410") // OpenCode's near-white
+  expect(V.markInk("#f59e0b")).toBe("#101410") // Pi's amber
+  expect(V.markInk("#4d6bfe")).toBe("#ffffff") // dsh's deep blue
+  expect(V.markInk("#d97757")).toBe("#ffffff") // Claude's terracotta
+  expect(V.markInk("not-a-color")).toBe("#101410")
+})
+
 test("a checkpoint's detail line carries its delta and byte split", () => {
   const d = V.detail(project.branches[1].commits[1], "en")
   expect(d.meta).toContain("10 files")

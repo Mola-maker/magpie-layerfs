@@ -20,25 +20,31 @@
   <p class="stamp" id="stamp"></p>
 </header>
 
+<section class="stats" id="stats">
+  <div class="tiles">
+    <div class="tile"><span class="k" data-t="checkpointsK">Checkpoints</span><span class="v" id="nCommits">0 / 0</span></div>
+    <div class="tile"><span class="k" data-t="branchesK">Branches</span><span class="v" id="tBranches">0</span></div>
+    <div class="tile"><span class="k" data-t="asCopies">as copies</span><span class="v" id="vCopies">0 B</span></div>
+    <div class="tile"><span class="k" data-t="stored">stored</span><span class="v" id="vStored">0 B</span></div>
+    <div class="tile"><span class="k" data-t="dedupe">dedupe</span><span class="v" id="tDedup">–</span><span class="s saved" id="vSaved"></span></div>
+  </div>
+  <div class="bar-row"><span class="bar-label" data-t="asCopies">as copies</span><div class="bar"><i id="barCopies" class="copies"></i></div></div>
+  <div class="bar-row"><span class="bar-label" data-t="stored">stored</span><div class="bar"><i id="barStored" class="stored"></i></div></div>
+  <p class="stats-line" id="statsLine"></p>
+</section>
+
 <div class="stage" id="stage"><svg id="graph" role="img" aria-label="worktree trajectory"></svg></div>
 <div class="legend" id="legend" hidden></div>
 
 <section class="controls" id="controls">
-  <button type="button" id="play">Replay</button>
-  <input type="range" id="scrub" min="0" value="0" step="1" aria-label="replay position">
-  <select id="speed" aria-label="speed">
-    <option value="0.5">0.5×</option>
-    <option value="1" selected>1×</option>
-    <option value="2">2×</option>
-    <option value="4">4×</option>
-  </select>
-</section>
-
-<section class="stats" id="stats">
-  <div class="nums"><span id="nCommits"></span><span class="saved" id="vSaved"></span></div>
-  <div class="bar-row"><span class="bar-label" data-t="asCopies">as copies</span><div class="bar"><i id="barCopies" class="copies"></i></div><span class="bar-val" id="vCopies"></span></div>
-  <div class="bar-row"><span class="bar-label" data-t="stored">stored</span><div class="bar"><i id="barStored" class="stored"></i></div><span class="bar-val" id="vStored"></span></div>
-  <p class="stats-line" id="statsLine"></p>
+  <button type="button" id="play" class="primary">Replay</button>
+  <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="replay position">
+  <div class="seg" id="speed" role="group" aria-label="speed">
+    <button type="button" data-speed="0.5">0.5×</button>
+    <button type="button" data-speed="1" aria-selected="true">1×</button>
+    <button type="button" data-speed="2">2×</button>
+    <button type="button" data-speed="4">4×</button>
+  </div>
 </section>
 
 <section class="detail" id="detail">

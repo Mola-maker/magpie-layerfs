@@ -122,6 +122,17 @@ its checkpoint's message and byte split, or click a branch's name tag
 to focus that branch alone: that is what the plugin does for an
 agent's edits, made visible.
 
+The page is drawn in magpie's own design language and built the way
+magpie builds pages — plain HTML, CSS and scripts, no build step and
+no dependencies, styled by the host's `--magpie-*` theme tokens with
+its tiles, seg controls and indigo accent. The replay runs on
+requestAnimationFrame through magpie's own `--ease` curve
+(cubic-bezier(.2,.8,.2,1)): the boughs draw themselves as the
+playhead passes, each leaf lands with a pulse, a publish pops its
+Layer badge (L1, L2, …) onto main, and the stat tiles count up with
+the same easing; with reduced motion preferred, the page simply
+shows the finished picture.
+
 A magpie page may read no live data — its sandbox forbids fetch — so
 after every tool call the plugin writes the recorded trajectory beside
 the page as `page/trajectory.js`, and the page animates that recording.

@@ -14,6 +14,7 @@
       recorded: "Recorded", branch: "branch", workspace: "workspace",
       live: "live", layers: "layers", history: "HISTORY", stats: "store.stats · read-only",
       dedupe: "dedupe", graft: "published", twig: "bare twig",
+      checkpointsK: "Checkpoints", branchesK: "Branches",
     },
     zh: {
       title: "LayerFS 轨迹", replay: "回放", pause: "暂停",
@@ -24,6 +25,7 @@
       recorded: "记录于", branch: "分支", workspace: "工作区",
       live: "条存活分支", layers: "层", history: "HISTORY", stats: "store.stats · 只读",
       dedupe: "去重", graft: "已发布", twig: "未发布的枝条",
+      checkpointsK: "检查点", branchesK: "分支",
     },
   };
 
@@ -199,6 +201,89 @@
     };
   }
 
+  // --- the replay's motion model, pure so a test can check it --------
+  // Magpie's own easing (its --ease token): cubic-bezier(.2,.8,.2,1).
+  // Solved the way browsers solve it: Newton steps on x, bisection
+  // when they stall.
+  function cubicBezier(x1, y1, x2, y2) {
+    const at = (a, b, u) => {
+      const v = 1 - u;
+      return 3 * v * v * u * a + 3 * v * u * u * b + u * u * u;
+    };
+    const dx = (u) => {
+      const v = 1 - u;
+      return 3 * v * v * x1 + 6 * v * u * (x2 - x1) + 3 * u * u * (1 - x2);
+    };
+    return (x) => {
+      if (x <= 0) return 0;
+      if (x >= 1) return 1;
+      let u = x;
+      for (let i = 0; i < 8; i++) {
+        const err = at(x1, x2, u) - x;
+        if (Math.abs(err) < 1e-6) return at(y1, y2, u);
+        const d = dx(u);
+        if (Math.abs(d) < 1e-6) break;
+        u -= err / d;
+      }
+      let lo = 0, hi = 1;
+      u = x;
+      while (hi - lo > 1e-6) {
+        if (at(x1, x2, u) < x) lo = u; else hi = u;
+        u = (lo + hi) / 2;
+      }
+      return at(y1, y2, u);
+    };
+  }
+  const magpieEase = cubicBezier(0.2, 0.8, 0.2, 1);
+  const easeOutCubic = (t) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
+  // a soft overshoot for the Layer badges popping in
+  const easeOutBack = (t) => {
+    t = Math.min(1, Math.max(0, t));
+    const c = 1.70158;
+    return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2);
+  };
+  const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+  // The replay at playhead t (0..steps.length, fractional): each step
+  // appears over the unit after its index, eased by magpie's curve.
+  // Bytes interpolate along the same easing, so the counters count up
+  // smoothly instead of jumping at each landing.
+  function frame(stepsList, t) {
+    const n = stepsList.length;
+    t = Math.min(n, Math.max(0, t));
+    const progress = new Array(n);
+    let logical = 0, stored = 0, landed = 0;
+    const branches = new Set();
+    for (let i = 0; i < n; i++) {
+      const raw = clamp01(t - i);
+      const p = magpieEase(raw);
+      progress[i] = p;
+      const prevL = i ? stepsList[i - 1].cumLogical : 0;
+      const prevS = i ? stepsList[i - 1].cumStored : 0;
+      logical += (stepsList[i].cumLogical - prevL) * p;
+      stored += (stepsList[i].cumStored - prevS) * p;
+      if (raw >= 1) { landed++; branches.add(stepsList[i].branch); }
+    }
+    return { progress, logical, stored, landed, branches: branches.size };
+  }
+
+  // A landing's pulse ring, u seconds-fraction through its life: it
+  // swells out and thins away. Null once spent.
+  function pulse(u) {
+    if (u < 0 || u > 1) return null;
+    return { scale: 0.35 + 1.9 * easeOutCubic(u), opacity: 0.85 * (1 - u) * (1 - u) };
+  }
+
+  // The ink for an agent's monogram on its own colour: near-black on
+  // light brand colours, white on dark ones (relative luminance).
+  function markInk(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""));
+    if (!m) return "#101410";
+    const n = parseInt(m[1], 16);
+    const lum = (0.2126 * (n >> 16) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255)) / 255;
+    return lum > 0.62 ? "#101410" : "#ffffff";
+  }
+
   // One line of a checkpoint's detail card.
   function detail(commit, lang) {
     const t = text(lang);
@@ -214,5 +299,8 @@
     };
   }
 
-  globalThis.LayerfsView = { TEXT, text, bytes, lanes, steps, publishes, layout, detail, AGENTS, agentOf };
+  globalThis.LayerfsView = {
+    TEXT, text, bytes, lanes, steps, publishes, layout, detail, AGENTS, agentOf,
+    cubicBezier, magpieEase, easeOutCubic, easeOutBack, clamp01, frame, pulse, markInk,
+  };
 })();
