@@ -458,13 +458,14 @@ export class SimBackend {
     return readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => decodeBranchName(f.slice(0, -5))).sort()
   }
 
-  makeCommit(project, branch, parent, manifest, message, newBytes, delta = { added: 0, modified: 0, deleted: 0 }) {
+  makeCommit(project, branch, parent, manifest, message, newBytes, delta = { added: 0, modified: 0, deleted: 0 }, agent = "") {
     const seed = JSON.stringify({ parent, branch, message, manifest }) + nowIso() + Math.random()
     const id = sha256(Buffer.from(seed)).slice(0, 12)
     const commit = {
       id, branch, parent, message, time: nowIso(),
       manifest, files: Object.keys(manifest).length,
       logicalBytes: manifestBytes(manifest), newBytes, delta,
+      ...(agent ? { agent } : {}),
     }
     const recordBytes = this.writeCommit(project, commit)
     this.bumpAccounting({ logicalDelta: commit.logicalBytes, storedDelta: recordBytes })
@@ -473,7 +474,10 @@ export class SimBackend {
   }
 
   // An append-only event log (provision / fork / checkpoint), the raw
-  // material for the trajectory the magpie page replays.
+  // material for the trajectory the magpie page replays. agent is the
+  // calling agent as the gateway knows it (the tool host's ctx.agent),
+  // when the caller passed one — the page attributes the work to the
+  // agent that actually made it, not to a branch name's token.
   recordEvent(event) {
     const path = join(this.root, "events.json")
     let events = []
@@ -486,7 +490,7 @@ export class SimBackend {
     try { return JSON.parse(readFileSync(join(this.root, "events.json"), "utf8")) } catch { return [] }
   }
 
-  async ensureProject(project, sourceDir) {
+  async ensureProject(project, sourceDir, agent = "") {
     if (this.projectExists(project)) return { created: false }
     mkdirPrivate(this.projectDir(project))
     writeJson(join(this.projectDir(project), "project.json"),
@@ -504,14 +508,14 @@ export class SimBackend {
     }
     const commit = this.makeCommit(project, "main", null, manifest,
       src ? `Import ${src}` : "Empty project", newBytes,
-      { added: Object.keys(manifest).length, modified: 0, deleted: 0 })
+      { added: Object.keys(manifest).length, modified: 0, deleted: 0 }, agent)
     return { created: true, commit: commit.id, skipped }
   }
 
   workspaceDir(project, branch) { return join(this.workspacesDir, project, encodeBranchName(branch)) }
 
-  async provision(project, branch = "main", sourceDir) {
-    const created = await this.ensureProject(project, sourceDir)
+  async provision(project, branch = "main", sourceDir, agent = "") {
+    const created = await this.ensureProject(project, sourceDir, agent)
     if (!this.branchExists(project, branch)) throw new Error(`no branch ${branch} in project ${project}`)
     const headId = this.head(project, branch)
     const dir = this.workspaceDir(project, branch)
@@ -532,7 +536,7 @@ export class SimBackend {
       chmodSync(out, f.mode ?? 0o644) // the manifest's mode, not the blob's or the umask's
     }
     writeJson(join(dir, BINDING), { project, branch, baseCommit: headId }, true)
-    this.recordEvent({ kind: "provision", project, branch, path: dir, commit: headId })
+    this.recordEvent({ kind: "provision", project, branch, path: dir, commit: headId, agent })
     return {
       path: dir, project, branch, backend: this.kind, commit: headId,
       reused: false, files: commit.files, logicalBytes: commit.logicalBytes,
@@ -544,7 +548,7 @@ export class SimBackend {
     }
   }
 
-  async checkpoint(project, branch = "main", message = "") {
+  async checkpoint(project, branch = "main", message = "", agent = "") {
     const dir = this.workspaceDir(project, branch)
     if (!existsSync(join(dir, BINDING))) throw new Error(`no workspace for ${project}/${branch}; provision it first`)
     const parent = this.head(project, branch)
@@ -557,8 +561,8 @@ export class SimBackend {
       else if (prev.manifest[rel].sha !== f.sha) modified++
     }
     for (const rel of Object.keys(prev.manifest)) if (!manifest[rel]) deleted++
-    const commit = this.makeCommit(project, branch, parent, manifest, message || "Checkpoint", newBytes, { added, modified, deleted })
-    this.recordEvent({ kind: "checkpoint", project, branch, commit: commit.id, message: commit.message })
+    const commit = this.makeCommit(project, branch, parent, manifest, message || "Checkpoint", newBytes, { added, modified, deleted }, agent)
+    this.recordEvent({ kind: "checkpoint", project, branch, commit: commit.id, message: commit.message, agent })
     writeJson(join(dir, BINDING), { project, branch, baseCommit: commit.id }, true)
     const stored = this.storedBytes()
     return {
@@ -569,12 +573,12 @@ export class SimBackend {
     }
   }
 
-  async fork(project, branch, from = "main") {
+  async fork(project, branch, from = "main", agent = "") {
     if (!this.projectExists(project)) throw new Error(`no project ${project}`)
     if (this.branchExists(project, branch)) throw new Error(`branch ${branch} already exists in project ${project}`)
     const headId = this.head(project, from)
     this.setHead(project, branch, headId)
-    this.recordEvent({ kind: "fork", project, branch, from, commit: headId })
+    this.recordEvent({ kind: "fork", project, branch, from, commit: headId, agent })
     return { project, branch, from, commit: headId, copiedBytes: 0 }
   }
 
@@ -584,7 +588,7 @@ export class SimBackend {
   // an ancestor of the branch head, so publishing can only ever move
   // main forward. force says "I know main has commits this branch never
   // saw" — the result then reports what was overwritten.
-  async publish(project, branch, { force = false } = {}) {
+  async publish(project, branch, { force = false, agent = "" } = {}) {
     checkProject(project); checkBranch(branch)
     if (branch === "main") throw new Error("publish names a branch other than main; main is what gets published to")
     const branchHead = this.head(project, branch)
@@ -600,7 +604,7 @@ export class SimBackend {
       throw new Error(`main has moved since ${branch} forked: main is at ${mainHead}, which is not in ${branch}'s history. Publishing would drop main's newer checkpoints. Fork a fresh branch from main, or pass force: true to overwrite deliberately.`)
     this.setHead(project, "main", branchHead)
     const layer = layers + 1
-    this.recordEvent({ kind: "publish", project, branch, commit: branchHead, layer, overwrote: !fastForward })
+    this.recordEvent({ kind: "publish", project, branch, commit: branchHead, layer, overwrote: !fastForward, agent })
     return { project, branch, layer, commit: branchHead, previousMain: mainHead, overwrote: !fastForward }
   }
 
@@ -609,7 +613,7 @@ export class SimBackend {
   // mount, run, commit. A command that changes nothing commits nothing;
   // a failing command's changes are still checkpointed (they are
   // history, and history can be rewound), with its exit code reported.
-  async exec(project, branch = "main", command, message = "", timeoutMs = 50000) {
+  async exec(project, branch = "main", command, message = "", timeoutMs = 50000, agent = "") {
     checkProject(project); checkBranch(branch)
     if (typeof command !== "string" || !command.trim()) throw new Error("command is a non-empty string")
     const dir = this.workspaceDir(project, branch)
@@ -620,7 +624,7 @@ export class SimBackend {
     const changed = !sameManifest(prev.manifest, manifest)
     let commit = null
     if (changed) {
-      const c = await this.checkpoint(project, branch, message || `exec: ${command.trim().slice(0, 60)}`)
+      const c = await this.checkpoint(project, branch, message || `exec: ${command.trim().slice(0, 60)}`, agent)
       commit = c.commit
     }
     return {
@@ -662,6 +666,7 @@ export class SimBackend {
             id: c.id, parent: c.parent, message: c.message, time: c.time,
             files: c.files, logicalBytes: c.logicalBytes, newBytes: c.newBytes,
             delta: c.delta ?? { added: 0, modified: 0, deleted: 0 },
+            ...(c.agent ? { agent: c.agent } : {}),
           })
         }
         id = c.parent
@@ -1109,7 +1114,7 @@ export class NativeBackend {
   // the branch must have forked from main's current top Layer — a stale
   // branch's tree would silently replace newer work on main, the same
   // failure the sim backend guards against in commit terms.
-  async publish(project, branch, { force = false } = {}) {
+  async publish(project, branch, { force = false, agent = "" } = {}) {
     checkProject(project); checkBranch(branch)
     if (branch === "main") throw new Error("publish names a branch other than main; main is what gets published to")
     await this.ensureProject(project)
@@ -1136,7 +1141,7 @@ export class NativeBackend {
     const overwrote = stale || unknown || (result.publishedLayer?.overwroteCount ?? 0) > 0
     state.publishes.push({
       branch, commit: info.head, layer, layerId: result.publishedLayer?.id ?? null,
-      parent: result.publishedLayer?.parent ?? null, overwrote, time: nowIso(),
+      parent: result.publishedLayer?.parent ?? null, overwrote, time: nowIso(), agent,
     })
     this.writeState(project, state)
     return {
@@ -1262,7 +1267,7 @@ export class NativeBackend {
   publishEvents(name) {
     return this.readState(name).publishes.map((p) => ({
       t: p.time, kind: "publish", project: name, branch: p.branch,
-      commit: p.commit, layer: p.layer, overwrote: p.overwrote,
+      commit: p.commit, layer: p.layer, overwrote: p.overwrote, agent: p.agent ?? "",
     }))
   }
 

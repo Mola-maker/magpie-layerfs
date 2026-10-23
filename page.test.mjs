@@ -24,6 +24,7 @@ test("the package declares the page magpie shows", () => {
   const html = read("index.html")
   expect(html).toContain("_magpie/bridge.js") // the host serves the bridge beside every page
   expect(html).toContain('src="trajectory.js"')
+  expect(html).toContain('src="trajectory-live.js"') // the tools keep the live trajectory beside the sample
   // the page sandbox forbids inline scripts and any fetch; the only
   // data script is the bundled sample trajectory shipped with the page
   expect(html).not.toMatch(/<script>(?!\s*src)/)
@@ -274,6 +275,25 @@ test("a checkpoint badge carries its agent's icon, else a monogram, else the lea
   expect(fb.agent.mark).toBe("Gk")
   V.ICONS.grok = saved
   expect(V.glyphFor("grok").type).toBe("icon")
+})
+
+test("a commit's real calling agent names its badge, ahead of the branch-name token guess", () => {
+  // claude worked on the release branch: the badge is claude's, not the leaf
+  const g = V.glyphFor("release", { agent: "claude" })
+  expect(g.type).toBe("icon")
+  expect(g.agent.id).toBe("claude")
+  // the branch-name guess still holds when the commit names no agent
+  expect(V.glyphFor("release", {}).type).toBe("leaf")
+  expect(V.glyphFor("release").type).toBe("leaf")
+  expect(V.glyphFor("claude-fix", { agent: "" }).type).toBe("icon")
+  // an agent the registry does not know leaves the badge to the branch
+  // guess (here none), and the detail card says the raw name
+  expect(V.glyphFor("release", { agent: "aider" }).type).toBe("leaf")
+})
+test("the detail card names the commit's real agent", () => {
+  expect(V.detail({ ...project.branches[1].commits[1], agent: "codex" }, "en").agent).toBe("Codex")
+  expect(V.detail({ ...project.branches[1].commits[1], agent: "aider" }, "en").agent).toBe("aider")
+  expect(V.detail(project.branches[1].commits[1], "en").agent).toBe("")
 })
 
 test("an icon draws itself as its step lands, then its fill fades in", () => {

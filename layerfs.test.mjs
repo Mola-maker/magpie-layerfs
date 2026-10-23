@@ -42,8 +42,10 @@ function fixture() {
 
 async function simTools(opts = { exec: true }) {
   const home = mkTmp("layerfs-home-")
+  const page = mkTmp("layerfs-page-")
   process.env.MAGPIE_LAYERFS_HOME = home
   process.env.MAGPIE_LAYERFS_BACKEND = "sim"
+  process.env.MAGPIE_LAYERFS_PAGE_DIR = page
   delete process.env.LAYERFS_SDK_PATH
   delete process.env.LAYERFS_STORE_PATH
   delete process.env.MAGPIE_LAYERFS_EXEC
@@ -57,7 +59,24 @@ async function simTools(opts = { exec: true }) {
   const call = (name, args) => tool[name].execute(
     name === "provision" && args.source === undefined ? { ...args, source: src } : args,
     { agent: "test", abort: AbortSignal.timeout(5000) })
-  return { call, home, src, tool }
+  return { call, home, src, tool, page }
+}
+
+// The live file is written by a debounced writer: poll for CONTENT, not
+// existence — an early write holds only the calls that landed before it.
+async function liveData(page, want, ms = 8000) {
+  const live = join(page, "trajectory-live.js")
+  const deadline = Date.now() + ms
+  for (;;) {
+    if (existsSync(live)) {
+      try {
+        const data = JSON.parse(readFileSync(live, "utf8").replace(/^globalThis\.LayerfsTrajectory = |;\n$/g, ""))
+        if (want(data)) return data
+      } catch { /* a mid-rename read, or an earlier state */ }
+    }
+    if (Date.now() > deadline) throw new Error("live trajectory never held the expected state")
+    await new Promise((r) => setTimeout(r, 50))
+  }
 }
 
 test("gives eight tools, each with a JSON Schema and an execute", async () => {
@@ -367,27 +386,67 @@ test("item 5: the native backend needs an explicit opt-in, not just an SDK path"
   await expect(createBackend({ MAGPIE_LAYERFS_BACKEND: "bogus" })).rejects.toThrow("auto, native or sim")
 })
 
-test("item 8 + r2 item 3: no trajectory file is maintained per call; the trajectory builds on demand", async () => {
+test("item 8 + r2 item 3: no trajectory file in the store; the page's live file carries the real trajectory", async () => {
   const pageFile = join(import.meta.dir, "page", "trajectory.js")
   const before = readFileSync(pageFile, "utf8")
-  const { call, home } = await simTools()
+  const { call, home, page } = await simTools()
   await call("provision", { project: "website" })
   await call("fork", { project: "website", branch: "feat" })
   const feat = await call("provision", { project: "website", branch: "feat" })
   writeFileSync(join(feat.path, "f.txt"), "f\n")
   await call("checkpoint", { project: "website", branch: "feat", message: "work" })
-  expect(readFileSync(pageFile, "utf8")).toBe(before) // the shipped file is a sample, untouched (item 8)
+  expect(readFileSync(pageFile, "utf8")).toBe(before) // the shipped sample is untouched (item 8)
   // 0.7.0 refreshed <root>/trajectory.json after every call; 0.7.1
   // dropped that — the refresh re-walked branch chains per call for a
-  // file nothing reads (r2 item 3)
+  // file nothing read (r2 item 3). 0.8.0's live file is the page's data
+  // channel instead: built by trajectory(), written to the PAGE folder
+  // (MAGPIE_LAYERFS_PAGE_DIR here, never the store), debounced off the
+  // tool calls' path.
   expect(existsSync(join(home, "trajectory.json"))).toBe(false)
-  // the trajectory itself is still there, built when asked
-  const traj = await new SimBackend(home).trajectory()
-  const proj = traj.projects.find((p) => p.name === "website")
+  // the live file lands in the page dir and carries the real trajectory
+  const data = await liveData(page, (d) =>
+    d.projects.find((p) => p.name === "website")?.branches.find((x) => x.name === "feat")?.commits.at(-1)?.message === "work")
+  const proj = data.projects.find((p) => p.name === "website")
   expect(proj.branches.map((x) => x.name).sort()).toEqual(["feat", "main"])
   const featSlice = proj.branches.find((x) => x.name === "feat")
   expect(featSlice.commits.at(-1).message).toBe("work")
+  expect(data.totals.logicalBytes).toBeGreaterThan(0)
+  // the trajectory itself is still there, built when asked
+  const traj = await new SimBackend(home).trajectory()
+  const proj2 = traj.projects.find((p) => p.name === "website")
+  expect(proj2.branches.map((x) => x.name).sort()).toEqual(["feat", "main"])
+  const featSlice2 = proj2.branches.find((x) => x.name === "feat")
+  expect(featSlice2.commits.at(-1).message).toBe("work")
   expect(traj.totals.logicalBytes).toBeGreaterThan(0)
+})
+
+test("calls record the real calling agent on commits and events; the live trajectory carries it to the page", async () => {
+  const { call, tool, home, page } = await simTools()
+  await call("provision", { project: "website" }) // agent "test" imports main
+  await call("fork", { project: "website", branch: "claude", from: "main" })
+  const ws = await call("provision", { project: "website", branch: "claude" })
+  writeFileSync(join(ws.path, "claude-work.txt"), "claude was here\n")
+  // a second agent checkpoints on the branch: the commit names the agent that made it
+  await tool.checkpoint.execute(
+    { project: "website", branch: "claude", message: "claude: first edit" },
+    { agent: "claude", abort: AbortSignal.timeout(5000) })
+  const b = new SimBackend(home)
+  const traj = await b.trajectory()
+  const proj = traj.projects.find((p) => p.name === "website")
+  const mainImport = proj.branches.find((x) => x.name === "main").commits[0]
+  expect(mainImport.agent).toBe("test") // the importing agent, not a guess from the branch name
+  const claudeCommit = proj.branches.find((x) => x.name === "claude").commits.at(-1)
+  expect(claudeCommit.agent).toBe("claude")
+  // events carry it too
+  const events = b.readEvents()
+  expect(events.find((e) => e.kind === "provision" && e.branch === "main").agent).toBe("test")
+  expect(events.find((e) => e.kind === "checkpoint" && e.branch === "claude").agent).toBe("claude")
+  // and the debounced live file, once it holds the checkpoint, carries the same picture
+  const data = await liveData(page, (d) =>
+    d.projects.find((p) => p.name === "website")?.branches.find((x) => x.name === "claude")?.commits.at(-1)?.agent === "claude")
+  const projLive = data.projects.find((p) => p.name === "website")
+  const claudeLive = projLive.branches.find((m) => m.name === "claude").commits.at(-1)
+  expect(claudeLive.agent).toBe("claude")
 })
 
 test("items 9+10: slash branches are distinct, flat, and listed everywhere", async () => {

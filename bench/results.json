@@ -6,28 +6,28 @@
  "agents": 6,
  "rounds": 3,
  "naive": {
-  "copyMs": 1980.2113610000001,
-  "snapshotMs": 1921.7810169999998,
+  "copyMs": 398.31049999999993,
+  "snapshotMs": 1387.7993,
   "totalBytes": 674758656
  },
  "plugin": {
-  "importMs": 982.486285,
-  "forkMs": 2.8124809999999343,
-  "provisionMs": 556.7959860000001,
-  "checkpointMs": 6678.5066050000005,
-  "storeBytes": 28557312,
+  "importMs": 2863.1266000000005,
+  "forkMs": 100.16470000000027,
+  "provisionMs": 1525.7592000000004,
+  "checkpointMs": 21459.334799999997,
+  "storeBytes": 29007601,
   "logicalBytes": 534183936,
   "workspaceBytes": 168690141,
-  "dedupRatio": 18.71,
-  "resolveUs": 144.885819000001
+  "dedupRatio": 18.42,
+  "resolveUs": 1291.3784000000014
  },
  "paths": [
-  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--main",
-  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-1",
-  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-2",
-  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-3",
-  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-4",
-  "/home/hatch/workspace/magpie-layerfs/bench/results/home/workspaces/benchproj--agent-5"
+  "E:\\layerfs\\magpie-layerfs\\bench\\results\\home\\workspaces\\benchproj\\main",
+  "E:\\layerfs\\magpie-layerfs\\bench\\results\\home\\workspaces\\benchproj\\agent-1",
+  "E:\\layerfs\\magpie-layerfs\\bench\\results\\home\\workspaces\\benchproj\\agent-2",
+  "E:\\layerfs\\magpie-layerfs\\bench\\results\\home\\workspaces\\benchproj\\agent-3",
+  "E:\\layerfs\\magpie-layerfs\\bench\\results\\home\\workspaces\\benchproj\\agent-4",
+  "E:\\layerfs\\magpie-layerfs\\bench\\results\\home\\workspaces\\benchproj\\agent-5"
  ],
- "when": "2026-10-22T12:40:15.102Z"
+ "when": "2026-10-23T01:58:25.043Z"
 }

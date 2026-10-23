@@ -190,7 +190,7 @@
       const anim = el("g", { class: "node" + (n.landing ? " landing" : ""), "data-branch": n.branch }, pos);
       el("circle", { r: 12.5, class: "badge-disc", fill: color }, anim);
       el("circle", { r: 12.5, class: "badge-ring", fill: "none", stroke: color }, anim);
-      const face = V.glyphFor(n.branch);
+      const face = V.glyphFor(n.branch, n.commit);
       const ink = V.markInk(color);
       const glyphPaths = [];
       let glyphMark = null;
@@ -399,7 +399,7 @@
     $("dBranch").textContent = `${t.branch}: ${node.branch}` +
       (graft ? ` · ${t.graft} L${graft.layer}` : node.branch !== "main" && isTip(node) && !view.L.graftedBranches.has(node.branch) ? ` · ${t.twig}` : "");
     $("dMsg").textContent = d.message;
-    $("dMeta").textContent = d.meta;
+    $("dMeta").textContent = [d.agent, d.meta].filter(Boolean).join(" · ");
     $("dDelta").textContent = d.delta;
     $("dTime").textContent = String(node.commit.time || "").replace("T", " ").slice(0, 19);
     $("dDot").style.background = colorOf(node.branch, node.lane);

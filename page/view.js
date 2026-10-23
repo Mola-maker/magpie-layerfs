@@ -349,9 +349,12 @@
 
   // What a branch's checkpoint badge carries: its agent's icon when
   // the branch names an agent, the agent's monogram when the agent
-  // has no drawable glyph, and the leaf when no agent is named.
-  function glyphFor(branch) {
-    const agent = agentOf(branch);
+  // has no drawable glyph, and the leaf when no agent is named. A
+  // commit that carries the real calling agent (ctx.agent, recorded
+  // by the tools) names its agent outright, ahead of the branch-name
+  // token guess.
+  function glyphFor(branch, commit) {
+    const agent = (commit && agentOf(commit.agent)) || agentOf(branch);
     if (!agent) return { type: "leaf", glyph: LEAF_GLYPH };
     const icon = ICONS[agent.id];
     if (icon) return { type: "icon", agent, icon };
@@ -376,7 +379,9 @@
     if (d.added) parts.push(`+${d.added} ${t.added}`);
     if (d.modified) parts.push(`~${d.modified} ${t.modified}`);
     if (d.deleted) parts.push(`-${d.deleted} ${t.deleted}`);
+    const a = commit.agent ? agentOf(commit.agent) : null;
     return {
+      agent: a ? a.name : String(commit.agent || ""),
       message: commit.message || "",
       meta: `${commit.files == null ? "" : `${commit.files} ${t.files} · `}${t.newBytes} ${bytes(commit.newBytes)} / ${bytes(commit.logicalBytes)}`,
       delta: parts.join(" · "),

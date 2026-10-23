@@ -226,6 +226,36 @@ MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<layerfs checkout>/sdk/js/src/inde
 Zero runtime dependencies; the arguments are JSON Schema, like the other
 tools packages. MIT.
 
+## Changes in 0.8.0
+
+The page shows the real trajectory now. The 0.7.x page could only
+animate the bundled sample — a magpie page cannot fetch, and the
+bridge's reads are a fixed host list — so the live picture the tools
+held never reached it. The channel was there all along, though:
+magpie serves a page's files from the plugin's folder as they sit on
+disk, per request. So:
+
+- **The page's live file.** After any provision, fork, checkpoint,
+  publish or exec lands, the tools rebuild the trajectory on demand
+  (`backend.trajectory()`) and write it, tmp-then-renamed, to
+  `page/trajectory-live.js` in the plugin's own folder — debounced,
+  off the tool calls' path, errors swallowed (the page keeps its
+  last file; the calls are untouched). The page loads it after the
+  bundled sample and prefers it. An empty store writes an empty
+  live file, and the page shows its honest empty state instead of
+  the demo; the sample remains what a store the tools have never
+  written shows. `MAGPIE_LAYERFS_PAGE_DIR` moves the folder (the
+  tests point it at a scratch dir, so the suite writes nothing into
+  the package).
+- **The real agent on every commit.** The tools record the calling
+  agent — the tool host's `ctx.agent`, the gateway's name for the
+  agent that made the call — on the events and commits each call
+  creates. The page prefers it over the branch-name token guess: a
+  claude badge lands where claude actually checkpointed, even on
+  `main`, and the detail card names the agent. On the native
+  backend the publish log carries it; the engine's own commit
+  records read no agent (the engine owns its records).
+
 ## Changes in 0.7.1
 
 The second round of the PR #318 review — the holes it found in
