@@ -1,5 +1,5 @@
 // Benchmark: the native backend against the real LayerFS engine.
-//   MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<sdk/js/src/index.js> \
+//   MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<api/agent/sdk/src/index.js> \
 //     bun bench/bench-native.mjs
 //
 // Same scenario as bench.mjs (one import, 6 agent forks, 3 checkpoint
@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url"
 import { NativeBackend } from "../layerfs.mjs"
 
 if (!process.env.LAYERFS_SDK_PATH) {
-  console.error("set LAYERFS_SDK_PATH to a layerfs checkout's sdk/js/src/index.js (native binding built)")
+  console.error("set LAYERFS_SDK_PATH to a layerfs checkout's api/agent/sdk/src/index.js (native binding built)")
   process.exit(2)
 }
 const here = dirname(fileURLToPath(import.meta.url))

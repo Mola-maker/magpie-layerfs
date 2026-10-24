@@ -9,10 +9,10 @@
 // the backend passes at spawn.
 //
 // The SDK itself is not an npm dependency this package can pin: it
-// ships in the LayerFS repo (Ephemeral-AI-Lab/layerfs, sdk/js) with a
-// native binding the user builds. LAYERFS_SDK_PATH names its entry,
-// and the backend only spawns this worker after the user has opted
-// in to the native backend.
+// ships in the LayerFS repo (Ephemeral-AI-Lab/layerfs, api/agent/sdk,
+// the @layerfs/agent package) with a native binding the user builds.
+// LAYERFS_SDK_PATH names its entry, and the backend only spawns this
+// worker after the user has opted in to the native backend.
 //
 // Protocol: JSON lines over stdio. A request is { id, op, project,
 // ... }; the answer is { id, ok: true, result } or { id, ok: false,
@@ -22,8 +22,12 @@ import { chmodSync, mkdirSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
-// The SDK reads both variables when a client is constructed; they are
-// set here, in this process only, before any client exists.
+// The SDK reads LAYERFS_HOME when a client is made; it is set here,
+// in this process only, before any client exists. LAYERFS_STORE_PATH
+// is likewise read once per client creation, so client() below
+// (re)sets it to the project's own store path immediately before
+// every factory call; the value set here is only the provisional one
+// the backend anchored the volume with.
 process.env.LAYERFS_HOME = process.env.LAYERFS_WORKER_HOME
 process.env.LAYERFS_STORE_PATH = process.env.LAYERFS_WORKER_STORE
 const volDir = process.env.LAYERFS_WORKER_VOL
@@ -33,9 +37,9 @@ function sdk() {
   const entry = process.env.LAYERFS_SDK_PATH
   if (!entry) {
     const e = new Error(
-      "native backend needs LAYERFS_SDK_PATH pointing at a layerfs checkout's sdk/js/src/index.js " +
-      "(the @layerfs/sdk package is not on npm; it ships with Ephemeral-AI-Lab/layerfs), " +
-      "with its native binding built (sdk/js/native/layerfs.node; see the layerfs repo's build-native script)")
+      "native backend needs LAYERFS_SDK_PATH pointing at a layerfs checkout's api/agent/sdk/src/index.js " +
+      "(the @layerfs/agent package is not on npm; it ships with Ephemeral-AI-Lab/layerfs), " +
+      "with its native binding built (api/binding/layerfs.node; see the layerfs repo's `npm --prefix api run build:native`)")
     e.code = "NoSdkPath"
     throw e
   }
@@ -43,20 +47,42 @@ function sdk() {
   return sdkPromise
 }
 
+// The per-project store location, exactly as the backend lays the
+// volume out: <volume>/<project>/global/store.sqlite. The directories
+// are private (the engine requires a private LAYERFS_HOME and store
+// tree) and must exist before Init installs the store file there.
+function storePathFor(project) {
+  const storePath = join(volDir, project, "global", "store.sqlite")
+  mkdirSync(dirname(storePath), { recursive: true, mode: 0o700 })
+  chmodSync(join(volDir, project), 0o700)
+  chmodSync(dirname(storePath), 0o700)
+  return storePath
+}
+
 // One client per project, as the binding expects: one process holds
-// one open store per project name, and a client captures LAYERFS_HOME
-// and its storePath at construction.
+// one open store per project name. Clients are made only by the SDK's
+// factories — LayerFS.open for an existing project, LayerFS.init for
+// a new one — which read LAYERFS_HOME and LAYERFS_STORE_PATH from the
+// environment once, at creation; there is no options argument. The
+// in-flight creation is cached synchronously so concurrent requests
+// for one project share a single open attempt; a refused attempt is
+// dropped from the cache (a later init may create the project), and
+// clients are never closed here — close() is final in this SDK (every
+// later call on a closed client is refused), so a cached client must
+// never be a closed one. The worker's exit releases every store.
 const clients = new Map()
-async function client(project) {
-  if (!clients.has(project)) {
-    const { LayerFS } = await sdk()
-    const storePath = join(volDir, project, "global", "store.sqlite")
-    mkdirSync(dirname(storePath), { recursive: true, mode: 0o700 })
-    chmodSync(join(volDir, project), 0o700)
-    chmodSync(dirname(storePath), 0o700)
-    clients.set(project, new LayerFS(project, { storePath }))
+function client(project) {
+  let p = clients.get(project)
+  if (!p) {
+    p = (async () => {
+      const { LayerFS } = await sdk()
+      process.env.LAYERFS_STORE_PATH = storePathFor(project)
+      return LayerFS.open(project)
+    })()
+    clients.set(project, p)
+    p.catch(() => { if (clients.get(project) === p) clients.delete(project) })
   }
-  return clients.get(project)
+  return p
 }
 
 // -- paginated SDK reads (the walk runs here; only results cross over)
@@ -142,9 +168,16 @@ const ops = {
     const st = await (await client(project)).fs.stat(branch, path)
     return { size: st.size, type: st.type, root: st.root }
   },
+  // Init is a factory in this SDK, not a client call: it creates the
+  // project from the source tree and returns its (open) client, whose
+  // `created` carries the import's Layer. A name that already exists
+  // is refused Exists, which the backend reads as "already created".
   init: async ({ project, sourceDir }) => {
-    const r = await (await client(project)).project.init(sourceDir)
-    return { layer: r.layer }
+    const { LayerFS } = await sdk()
+    process.env.LAYERFS_STORE_PATH = storePathFor(project)
+    const lfs = await LayerFS.init(project, sourceDir)
+    clients.set(project, Promise.resolve(lfs))
+    return { layer: lfs.created.layer }
   },
   fork: async ({ project, branch, from }) => {
     await (await client(project)).branch.fork(branch, from)

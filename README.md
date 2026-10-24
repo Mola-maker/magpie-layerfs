@@ -45,12 +45,13 @@ management — if it matters, it belongs in the workspace.
 ## Backends
 
 - **native** — the real LayerFS through its JavaScript SDK
-  (`@layerfs/sdk` from a [layerfs](https://github.com/Ephemeral-AI-Lab/layerfs)
+  (`@layerfs/agent` from a [layerfs](https://github.com/Ephemeral-AI-Lab/layerfs)
   checkout; the SDK is not on npm, and its native binding must be built —
-  `sdk/js/scripts/build-native.mjs`). **Off by default**: it runs only
+  `npm --prefix api run build:native`, producing `api/binding/layerfs.node`).
+  **Off by default**: it runs only
   when the user opts in — the plugin's `"native"` option, or
   `MAGPIE_LAYERFS_NATIVE=1` — with `LAYERFS_SDK_PATH` set (the SDK
-  entry, `sdk/js/src/index.js`); `LAYERFS_STORE_PATH` is optional and
+  entry, `api/agent/sdk/src/index.js`); `LAYERFS_STORE_PATH` is optional and
   only anchors the store volume elsewhere. When it runs, **every SDK
   call happens in a child process** (`native-worker.mjs`, shipped in
   this package): the plugin host process never imports the SDK and
@@ -58,7 +59,7 @@ management — if it matters, it belongs in the workspace.
   the worker gets its own. A pinned npm dependency would be tidier,
   but the SDK is not published to npm, so a version pin does not exist
   to pin; the opt-in plus the subprocess is the mitigation. Adapted
-  and verified against a locally built binding (LayerFS 1.0.0): the
+  and verified against a locally built binding (LayerFS 1.1.0): the
   SDK's store calls (project / branch / fs) run in the worker, so
   provision materializes a *checkout* of the branch through
   `fs.list` / `fs.read`, and a checkpoint diffs that checkout and
@@ -72,8 +73,10 @@ management — if it matters, it belongs in the workspace.
   upstream PR #416 — but `fs.read` refuses binary content with code
   Binary, upstream issue #417, so checkouts and checkpoints name the
   binary files they cannot move instead of dropping them), and
-  `project.init` refuses a source tree on overlayfs with an opaque
-  `Project(InvalidInput)`.
+  `LayerFS.init` refuses a source tree on overlayfs with an opaque
+  `Project(InvalidInput)`. Project init runs through that factory,
+  whose timeout the SDK makes configurable (300 s by default; 1.0.0's
+  fixed 60 s is gone) — this backend keeps the SDK default.
 - **sim** (the default) — a local content-addressed store implementing
   the same model: immutable blobs named by SHA-256, branches as
   manifest pointers, checkpoints as deduplicated manifests, under
@@ -217,7 +220,7 @@ From a checkout of [this repo](https://github.com/Mola-maker/magpie-layerfs)
 bun test                 # the suite (bun:test): tools end to end, plus the page's layout math
 bun bench/bench.mjs      # the benchmark above; writes bench/results.json
 node tools/gen-trajectory.mjs   # regenerate the page's bundled sample trajectory
-MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<layerfs checkout>/sdk/js/src/index.js bun test
+MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<layerfs checkout>/api/agent/sdk/src/index.js bun test
                          # the same suite against the real SDK (the native
                          # backend's logic also runs against a fake SDK —
                          # fake-sdk.mjs — in the plain suite)
@@ -225,6 +228,37 @@ MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<layerfs checkout>/sdk/js/src/inde
 
 Zero runtime dependencies; the arguments are JSON Schema, like the other
 tools packages. MIT.
+
+## Changes in 0.9.0
+
+The native backend speaks LayerFS 1.1.0. That release split the SDK
+(`@layerfs/sdk`, from `sdk/js`) into `@layerfs/agent`, `@layerfs/backend`
+and `@layerfs/runtime` (sources under `api/`), and replaced the client
+constructor with factories: `LayerFS.open(name)` for an existing
+project (a missing one is refused `NoSuchProject` at once) and
+`LayerFS.init(name, folder, timeout?)` for a new one, with every
+setting read from the environment at creation — the constructor's
+options argument is refused, and `close()` is now final. The worker
+(the only file that imports the SDK) follows: it sets the project's
+`LAYERFS_STORE_PATH` immediately before each factory call, caches the
+creation so concurrent calls share one open attempt, drops a refused
+attempt instead of caching it, and never closes a client. Init is the
+factory call, with the SDK's configurable timeout (300 s by default;
+this backend keeps the default) and its answer's Layer read from the
+client's `created`. The surfaces this backend uses — `project`,
+`branch` and `fs` — kept their calls and answer shapes, so nothing
+else moved: the sim backend, the tools and the page are unchanged,
+and the fake SDK the plain suite drives was ported to the same
+factory shape (`open` refusing `NoSuchProject`, `init` refusing
+`Exists`, `fs.read`/`fs.stat` refusing a missing path as
+`NoSuchPath`). Verified against a locally built 1.1.0 binding: the
+plain suite and the real-SDK suite both pass. `LAYERFS_SDK_PATH` now
+points at `api/agent/sdk/src/index.js` in a layerfs checkout, and the
+binding builds with `npm --prefix api run build:native`. One upstream
+limit is unchanged: `fs.read` still refuses binary content (issue
+#417), so the native backend still names the binary files it cannot
+move. A store written by LayerFS 1.0.0 opens as it did — the store
+format did not change.
 
 ## Changes in 0.8.0
 

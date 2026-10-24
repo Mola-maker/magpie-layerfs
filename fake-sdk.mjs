@@ -1,12 +1,18 @@
-// A minimal fake of @layerfs/sdk for the test suite — the same move
-// the review made: drive the native backend's logic without building
-// the real binding. It implements exactly the surface the worker
-// (native-worker.mjs) calls, with the real SDK's shapes: paginated
-// lists, branch info { name, head, base, forkedFrom }, commits newest
-// first, fs.read refusing binaries with code Binary, publish
-// appending a Layer to main. State is per client instance, in memory;
-// the worker holds one client per project, so state persists across
-// the calls of one backend.
+// A minimal fake of @layerfs/agent (LayerFS 1.1.0) for the test
+// suite — the same move the review made: drive the native backend's
+// logic without building the real binding. It implements exactly the
+// surface the worker (native-worker.mjs) calls, with the real SDK's
+// shapes and factory protocol: clients are made only by the statics
+// LayerFS.open (an existing project; a missing one is refused
+// NoSuchProject) and LayerFS.init (a new one; an existing name is
+// refused Exists, and the returned client carries `created.layer`),
+// lists are paginated, branch info is { name, head, base, forkedFrom },
+// commits are newest first, fs.read refuses binaries with code
+// Binary, and publish appends a Layer to main. State is per project
+// in a module-level registry — as the real SDK's stores are per
+// project — so every client of one project in this process sees the
+// same branches; the worker holds one client per project, so state
+// persists across the calls of one backend.
 //
 // Test-only: this file is not in package.json's files and never ships.
 // FAKE_SDK_NULL_FORK=1 makes fork record a null fork point, to
@@ -32,42 +38,71 @@ function importTree(dir) {
   return files
 }
 
+// project name -> { branches, commitSeq, layerSeq }
+const projects = new Map()
+
 export class LayerFS {
-  constructor(project, _opts = {}) {
+  /** An open client of an existing project; a missing one is refused
+   * NoSuchProject, as the real factory's project lookup refuses it. */
+  static async open(project) {
+    const state = projects.get(project)
+    if (!state) throw err("NoSuchProject", `no project ${project}`)
+    return new LayerFS(project, state)
+  }
+
+  /** Creates the project from a source tree, then opens it; the
+   * returned client carries Init's answer as `created`. An existing
+   * name is refused Exists. */
+  static async init(project, sourceDir, _timeout) {
+    if (projects.has(project)) throw err("Exists", `project ${project} already exists`)
+    const state = { branches: new Map(), commitSeq: 0, layerSeq: 0 }
+    const layer = `L${state.layerSeq}`
+    state.branches.set("main", {
+      name: "main", head: layer, base: layer, forkedFrom: null,
+      commits: [], files: importTree(sourceDir),
+    })
+    projects.set(project, state)
+    const client = new LayerFS(project, state)
+    client.created = { kind: "Initialized", project, layer, root: "fake-root", store: "fake-store" }
+    return client
+  }
+
+  constructor(project, state) {
     this.projectName = project
-    this.branches = new Map()
-    this.commitSeq = 0
-    this.layerSeq = 0
+    this.state = state
+    this.closed = false
+  }
+
+  /** Releases this client; like the real SDK, every later call on it
+   * is refused — the worker never closes its cached clients. */
+  async close() { this.closed = true }
+
+  live() {
+    if (this.closed) throw err("InvalidInput", "this client is closed")
   }
 
   branchState(name) {
-    const b = this.branches.get(name)
+    this.live()
+    const b = this.state.branches.get(name)
     if (!b) throw err("NoSuchBranch", `no branch ${name}`)
     return b
   }
 
   project = {
-    init: async (sourceDir) => {
-      if (this.branches.size) throw err("Exists", "project already initialized")
-      const layer = `L${this.layerSeq}`
-      this.branches.set("main", {
-        name: "main", head: layer, base: layer, forkedFrom: null,
-        commits: [], files: importTree(sourceDir),
-      })
-      return { layer }
-    },
     list_branches: async (limit, pos) => {
-      let items = [...this.branches.values()]
+      this.live()
+      let items = [...this.state.branches.values()]
         .map(({ name, head, base, forkedFrom }) => ({ name, head, base, forkedFrom }))
       if (process.env.FAKE_SDK_DROP_MAIN === "1") items = items.filter((b) => b.name !== "main")
       return { items: items.slice(pos, pos + limit), hasMore: pos + limit < items.length, nextPagePos: pos + limit }
     },
+    list_sandboxes: async () => ({ items: [], hasMore: false, nextPagePos: null }),
   }
 
   branch = {
     fork: async (name, from) => {
       const src = this.branchState(from)
-      this.branches.set(name, {
+      this.state.branches.set(name, {
         name, head: src.head, base: src.base,
         forkedFrom: process.env.FAKE_SDK_NULL_FORK === "1" ? null : src.base,
         commits: [...src.commits], files: new Map(src.files),
@@ -81,7 +116,7 @@ export class LayerFS {
       const src = this.branchState(name)
       const main = this.branchState("main")
       const parent = main.base
-      const id = `L${++this.layerSeq}`
+      const id = `L${++this.state.layerSeq}`
       main.base = id
       main.head = src.head
       main.files = new Map(src.files)
@@ -114,12 +149,12 @@ export class LayerFS {
       if (b.files.has(rel)) return { size: b.files.get(rel).length, type: "file", root: path }
       if (rel === "" || [...b.files.keys()].some((k) => k.startsWith(rel + "/")))
         return { size: 0, type: "dir", root: path }
-      throw err("NotFound", `no such path ${path}`)
+      throw err("NoSuchPath", `no such path ${path}`)
     },
     read: async (branch, path, _startLine) => {
       const b = this.branchState(branch)
       const buf = b.files.get(path.slice(1))
-      if (!buf) throw err("NotFound", `no such file ${path}`)
+      if (!buf) throw err("NoSuchPath", `no such file ${path}`)
       if (!isTextBuf(buf)) throw err("Binary", "file is binary")
       return { text: buf.toString("utf8"), nextLine: null }
     },
@@ -139,7 +174,7 @@ export class LayerFS {
       let logical = 0
       for (const buf of b.files.values()) logical += buf.length
       const commit = {
-        id: `c${++this.commitSeq}`, parent: b.head, message,
+        id: `c${++this.state.commitSeq}`, parent: b.head, message,
         time: Date.now(), logical, newStored, newMetadata: 0,
       }
       b.head = commit.id

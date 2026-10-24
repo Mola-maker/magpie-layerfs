@@ -3,10 +3,10 @@
 // Two backends sit behind one small surface (provision, checkpoint, fork,
 // history, resolve, status):
 //
-// - native: the real LayerFS, through the `@layerfs/sdk` JavaScript SDK
-//   (Ephemeral-AI-Lab/layerfs, sdk/js). The SDK is not published to npm; it
-//   ships in a layerfs checkout and needs its native binding plus a mounted
-//   LayerFS store volume. It is OFF unless the user opts in, and when it is
+// - native: the real LayerFS, through the `@layerfs/agent` JavaScript SDK
+//   (Ephemeral-AI-Lab/layerfs, api/agent/sdk). The SDK is not published to
+//   npm; it ships in a layerfs checkout and needs its native binding plus a
+//   mounted LayerFS store volume. It is OFF unless the user opts in, and when it is
 //   on, every SDK call runs in a child process (native-worker.mjs): the
 //   plugin host process never imports the SDK and never has LAYERFS_*
 //   variables written into its shared environment.
@@ -21,7 +21,7 @@
 //   MAGPIE_LAYERFS_HOME     state root for both backends (default ~/.magpie-layerfs)
 //   MAGPIE_LAYERFS_NATIVE   1 opts in to the native backend (or the
 //                           plugin's "native" option in magpie)
-//   LAYERFS_SDK_PATH        path to the SDK entry (sdk/js/src/index.js)
+//   LAYERFS_SDK_PATH        path to the SDK entry (api/agent/sdk/src/index.js)
 //   LAYERFS_STORE_PATH      native only, optional: the store file
 //                           (<volume>/global/store.sqlite) anchoring the
 //                           LayerFS volume; per-project stores live under
@@ -748,14 +748,15 @@ export class SimBackend {
 // ---- native backend --------------------------------------------------------------
 //
 // The real LayerFS, adapted to what the SDK actually does
-// (verified against a locally built binding, layerfs 1.0.0, 2026-10-22):
+// (verified against a locally built binding, layerfs 1.1.0, 2026-10-24):
 //
 // - Store calls (project/branch/fs) run in the worker process against a global
 //   SQLite store per project; project entries live at LAYERFS_HOME/<name>,
 //   each project's store at <volume>/<project>/global/store.sqlite, where
 //   <volume> is derived from LAYERFS_STORE_PATH. The store's filesystem
 //   must carry SQLite locks (ext4, xfs or btrfs; tmpfs is refused).
-// - project.init imports a source tree as main's first Layer. A source on
+// - LayerFS.init (the SDK's factory; 1.1.0 has no client-level init)
+//   imports a source tree as main's first Layer. A source on
 //   overlayfs is refused by the engine with an opaque Project(InvalidInput)
 //   (reported upstream); other filesystems import fine.
 // - workspace.* calls (mount/exec/commit) need a deployment (Docker,
@@ -776,11 +777,15 @@ export class SimBackend {
 //   binary files it could not commit, instead of silently dropping
 //   them. Binaries that must enter a project arrive via the initial
 //   import.
-// - One process holds one open store per project name (refcounted by
-//   the binding; the last client closes it), and a client captures
-//   LAYERFS_HOME and its storePath at construction. That process is
-//   the worker (native-worker.mjs), a child this backend spawns: the
-//   plugin host process never imports the SDK and never has LAYERFS_*
+// - One process holds one open store per project name. Clients are
+//   made only by the SDK's LayerFS.open / LayerFS.init factories, which
+//   read LAYERFS_HOME and LAYERFS_STORE_PATH from the environment
+//   once, at creation (there is no options argument) — the worker sets
+//   the project's store path immediately before each creation, and
+//   never closes a client (close() is final: a closed client refuses
+//   every later call). That process is the worker (native-worker.mjs),
+//   a child this backend spawns: the plugin host process never imports
+//   the SDK and never has LAYERFS_*
 //   written into its shared environment — the worker gets its own env
 //   and keeps one client per project there.
 // - Publish is a Layer operation: branch.publish(branch, head) appends
@@ -821,9 +826,9 @@ export class NativeBackend {
     if (this._worker) return this._worker
     const entry = process.env.LAYERFS_SDK_PATH
     if (!entry) throw new Error(
-      "native backend needs LAYERFS_SDK_PATH pointing at a layerfs checkout's sdk/js/src/index.js " +
-      "(the @layerfs/sdk package is not on npm; it ships with Ephemeral-AI-Lab/layerfs), " +
-      "with its native binding built (sdk/js/native/layerfs.node; see the layerfs repo's build-native script)")
+      "native backend needs LAYERFS_SDK_PATH pointing at a layerfs checkout's api/agent/sdk/src/index.js " +
+      "(the @layerfs/agent package is not on npm; it ships with Ephemeral-AI-Lab/layerfs), " +
+      "with its native binding built (api/binding/layerfs.node; see the layerfs repo's `npm --prefix api run build:native`)")
     const workerPath = join(dirname(fileURLToPath(import.meta.url)), "native-worker.mjs")
     const env = { ...process.env }
     delete env.LAYERFS_HOME
@@ -1312,7 +1317,7 @@ export async function createBackend(env = process.env, options = {}) {
   if (want === "native" && !nativeOptedIn(env, options))
     throw new Error(
       "the native LayerFS backend is off by default: it runs the LayerFS SDK in a child process with the host's rights. " +
-      "Enable it with the plugin's \"native\" option or MAGPIE_LAYERFS_NATIVE=1, with LAYERFS_SDK_PATH pointing at a layerfs checkout's sdk/js/src/index.js.")
+      "Enable it with the plugin's \"native\" option or MAGPIE_LAYERFS_NATIVE=1, with LAYERFS_SDK_PATH pointing at a layerfs checkout's api/agent/sdk/src/index.js.")
   // auto: native when the SDK is configured AND the user opted in,
   // sim otherwise (the native backend derives its store volume itself;
   // LAYERFS_STORE_PATH only anchors it elsewhere when set)
