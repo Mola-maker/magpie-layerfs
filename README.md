@@ -241,6 +241,15 @@ now lives in `page-data.mjs`, beside the entry: `index.mjs` imports it,
 the host never scans it, and the entry exports only `LayerfsTools`. No
 behaviour change.
 
+The first start after the upgrade also writes the live file once, when
+the store already holds a project (`projects/` or `native/projects/` is
+on disk) and the data folder has no live file yet — otherwise the page
+would show the bundled sample until an agent's next call, which is the
+"still the old demo" report this whole line of work answers. A host with
+no store is left untouched: the check reads the store's folders from
+disk, never constructs the backend (whose constructor creates them), so
+installing the plugin still creates nothing until the first tool call.
+
 ## Changes in 0.10.0
 
 The page's live channel comes back, out of the plugin's own folder. The

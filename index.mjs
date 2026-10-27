@@ -18,6 +18,7 @@
 // always behind a child process — otherwise a local content-addressed
 // store with the same model. See layerfs.mjs and the README.
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { checkBranch, checkInnerPath, checkProject, checkSourceDir, createBackend } from "./layerfs.mjs"
@@ -125,6 +126,18 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
     const out = await fn(b)
     try { scheduleLive(b) } catch { /* never on the tool call's path */ }
     return out
+  }
+  // The first host start with a live channel has no live file yet: the
+  // page would show the bundled sample until an agent's next call. If the
+  // user already has work, write it once now. A host with no store is
+  // left untouched — creating one from a bare LayerfsTools({}) is what
+  // the no-refresh-at-start rule avoids — so the check reads the store's
+  // own projects folder from disk, never the backend (whose constructor
+  // is what mkdirs).
+  if (!existsSync(join(pageDir(), LIVE))) {
+    const home = process.env.MAGPIE_LAYERFS_HOME || join(homedir(), ".magpie-layerfs")
+    const hasWork = existsSync(join(home, "projects")) || existsSync(join(home, "native", "projects"))
+    if (hasWork) backend().then((b) => writeLive(b)).catch(() => { /* the page keeps the sample */ })
   }
 
   return {

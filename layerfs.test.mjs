@@ -915,6 +915,36 @@ test("r3 item 2: the page's live file carries per-agent tool-call events", async
   expect(p.path).toContain("website")
 })
 
+test("r3 item 2: a first start with existing work writes the live file; a host with no store is left untouched", async () => {
+  const home = mkTmp("layerfs-home-")
+  process.env.MAGPIE_LAYERFS_HOME = home
+  process.env.MAGPIE_LAYERFS_BACKEND = "sim"
+  const page = mkTmp("layerfs-page-")
+  process.env.MAGPIE_LAYERFS_PAGE_DIR = page
+  delete process.env.MAGPIE_LAYERFS_INSTALL_DIR
+  delete process.env.MAGPIE_LAYERFS_DATA_DIR
+  delete process.env.LAYERFS_SDK_PATH
+  delete process.env.LAYERFS_STORE_PATH
+  // (a) no store: a bare host start creates nothing and writes no live file
+  const { LayerfsTools: Bare } = await import("./index.mjs?startup-bare")
+  await Bare({ directory: mkTmp("magpie-config-") }, {})
+  await new Promise((r) => setTimeout(r, 300))
+  expect(existsSync(join(page, "trajectory-live.js"))).toBe(false)
+  expect(existsSync(join(home, "projects"))).toBe(false) // the store was never created
+  // (b) the store gets work, then a fresh host start with no live file —
+  // the upgrade: the data folder is new, the work is not
+  const { tool } = await Bare({ directory: mkTmp("magpie-config-") }, {})
+  await tool.provision.execute(
+    { project: "website", source: fixture() }, { agent: "x", abort: AbortSignal.timeout(5000) })
+  await liveData(page, (d) => (d.events ?? []).some((e) => e.kind === "provision"))
+  rmSync(join(page, "trajectory-live.js"))
+  const { LayerfsTools: Fresh } = await import("./index.mjs?startup-work")
+  await Fresh({ directory: mkTmp("magpie-config-") }, {})
+  const data = await liveData(page, (d) =>
+    (d.events ?? []).some((e) => e.kind === "provision" && e.project === "website"))
+  expect(data.projects.at(-1).name).toBe("website")
+})
+
 test("r3 item 2: a development checkout is never swapped — only the install is", async () => {
   // the accident the guard exists for: LayerfsTools() running from a
   // checkout (a .git beside index.mjs) must leave the checkout's page/
