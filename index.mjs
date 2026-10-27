@@ -17,11 +17,10 @@
 // option, or MAGPIE_LAYERFS_NATIVE=1) with LAYERFS_SDK_PATH set, and
 // always behind a child process — otherwise a local content-addressed
 // store with the same model. See layerfs.mjs and the README.
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { checkBranch, checkInnerPath, checkProject, checkSourceDir, createBackend } from "./layerfs.mjs"
+import { checkBranch, checkInnerPath, checkProject, checkSourceDir, createBackend, storeHome } from "./layerfs.mjs"
 import { LIVE, dataDir, ensurePageData } from "./page-data.mjs"
 
 const str = (v, name) => {
@@ -90,18 +89,17 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
   }
   // The live trajectory, per plugin instance: a trailing debounce coalesces
   // a burst of parallel agents' calls into one rebuild-and-write. The file
-  // persists in the page folder, so it is already current when magpie (and
-  // the host) restarts — there is deliberately no refresh at plugin start:
-  // it would create the store (or touch the page folder) from a bare
-  // `LayerfsTools({})`, and nothing has changed that the last write missed.
+  // persists in the data folder, so it is already current when magpie (and
+  // the host) restarts; the one startup refresh below covers the first
+  // start with no file yet.
   let liveTimer = null, liveInFlight = false, livePending = false
-  const writeLive = async (b, dir = pageDir()) => {
-    const data = await b.trajectory()
+  const writeTrajectory = (data, dir) => {
     mkdirSync(dir, { recursive: true })
     const tmp = join(dir, `${LIVE}.tmp`)
     writeFileSync(tmp, `globalThis.LayerfsTrajectory = ${JSON.stringify(data)};\n`)
     renameSync(tmp, join(dir, LIVE))
   }
+  const writeLive = async (b, dir = pageDir()) => writeTrajectory(await b.trajectory(), dir)
   const scheduleLive = (b) => {
     // The dir is read at schedule time, not fire time: the env can
     // change under the timer (a test suite's per-test env), and the
@@ -127,17 +125,26 @@ export const LayerfsTools = async (ctx = {}, options = {}) => {
     try { scheduleLive(b) } catch { /* never on the tool call's path */ }
     return out
   }
-  // The first host start with a live channel has no live file yet: the
-  // page would show the bundled sample until an agent's next call. If the
-  // user already has work, write it once now. A host with no store is
-  // left untouched — creating one from a bare LayerfsTools({}) is what
-  // the no-refresh-at-start rule avoids — so the check reads the store's
-  // own projects folder from disk, never the backend (whose constructor
-  // is what mkdirs).
-  if (!existsSync(join(pageDir(), LIVE))) {
-    const home = process.env.MAGPIE_LAYERFS_HOME || join(homedir(), ".magpie-layerfs")
-    const hasWork = existsSync(join(home, "projects")) || existsSync(join(home, "native", "projects"))
-    if (hasWork) backend().then((b) => writeLive(b)).catch(() => { /* the page keeps the sample */ })
+  // The first host start with a live channel may have no live file yet:
+  // the page would show the bundled sample until an agent's next call. If
+  // the user already has committed work, write it once now. Both checks
+  // are read-only on disk — a store that holds no project entries is left
+  // untouched, and the backend is built only when one does (its
+  // constructor is what creates a missing store). What the backend
+  // answers decides the write, so work it cannot see (native projects on
+  // a sim host) never overwrites the page with an empty picture.
+  const startupDir = pageDir()
+  if (!existsSync(join(startupDir, LIVE))) {
+    const home = storeHome()
+    const holders = [join(home, "projects"), join(home, "native", "projects")]
+    const hasEntries = holders.some((p) => {
+      try { return readdirSync(p).length > 0 } catch { return false }
+    })
+    if (hasEntries)
+      backend()
+        .then((b) => b.trajectory())
+        .then((data) => { if (data.projects.length > 0) writeTrajectory(data, startupDir) })
+        .catch(() => { /* the page keeps the sample */ })
   }
 
   return {

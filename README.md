@@ -242,13 +242,16 @@ the host never scans it, and the entry exports only `LayerfsTools`. No
 behaviour change.
 
 The first start after the upgrade also writes the live file once, when
-the store already holds a project (`projects/` or `native/projects/` is
-on disk) and the data folder has no live file yet — otherwise the page
-would show the bundled sample until an agent's next call, which is the
-"still the old demo" report this whole line of work answers. A host with
-no store is left untouched: the check reads the store's folders from
-disk, never constructs the backend (whose constructor creates them), so
-installing the plugin still creates nothing until the first tool call.
+the store already holds a project and the data folder has no live file
+yet — otherwise the page would show the bundled sample until an agent's
+next call, which is the "still the old demo" report this whole line of
+work answers. Both gates are read-only on disk: the backend is built
+only when a projects folder (`projects/` or `native/projects/`) holds
+entries, and the file is written only when the backend that would
+actually serve calls reports at least one project — so a host with no
+store still creates nothing, and work the selected backend cannot see
+(native projects on a sim host) never overwrites the page with an empty
+picture.
 
 ## Changes in 0.10.0
 

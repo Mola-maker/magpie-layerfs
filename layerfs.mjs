@@ -338,11 +338,16 @@ function runShell(command, dir, timeoutMs) {
 
 // ---- sim backend ---------------------------------------------------------------
 
+// The store's root: MAGPIE_LAYERFS_HOME moves it; the default sits under
+// ~/.magpie-layerfs. The one copy of this rule — both backends, the page's
+// data folder and the host's startup check read it here.
+export const storeHome = () => process.env.MAGPIE_LAYERFS_HOME || join(homedir(), ".magpie-layerfs")
+
 export class SimBackend {
   kind = "sim"
 
   constructor(root) {
-    this.root = root || process.env.MAGPIE_LAYERFS_HOME || join(homedir(), ".magpie-layerfs")
+    this.root = root || storeHome()
     this.objectsDir = join(this.root, "store", "objects")
     this.projectsDir = join(this.root, "projects")
     this.workspacesDir = join(this.root, "workspaces")
@@ -799,7 +804,7 @@ export class NativeBackend {
   kind = "native"
 
   constructor(root) {
-    this.root = root || process.env.MAGPIE_LAYERFS_HOME || join(homedir(), ".magpie-layerfs")
+    this.root = root || storeHome()
     this.nativeRoot = join(this.root, "native")
     this.homeDir = join(this.nativeRoot, "home") // LAYERFS_HOME for the SDK (in the worker)
     const envStore = process.env.LAYERFS_STORE_PATH

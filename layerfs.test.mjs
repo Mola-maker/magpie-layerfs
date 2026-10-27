@@ -945,6 +945,36 @@ test("r3 item 2: a first start with existing work writes the live file; a host w
   expect(data.projects.at(-1).name).toBe("website")
 })
 
+test("r3 item 2: the startup write is gated on real projects — empty or foreign folders write nothing", async () => {
+  const home = mkTmp("layerfs-home-")
+  const page = mkTmp("layerfs-page-")
+  process.env.MAGPIE_LAYERFS_HOME = home
+  process.env.MAGPIE_LAYERFS_BACKEND = "sim"
+  process.env.MAGPIE_LAYERFS_PAGE_DIR = page
+  delete process.env.MAGPIE_LAYERFS_INSTALL_DIR
+  delete process.env.MAGPIE_LAYERFS_DATA_DIR
+  delete process.env.LAYERFS_SDK_PATH
+  delete process.env.LAYERFS_STORE_PATH
+  // (a) a projects folder holding nothing: no write, and the backend is
+  // never built — its constructor is what creates the rest of the store
+  mkdirSync(join(home, "projects"))
+  mkdirSync(join(home, "native", "projects"), { recursive: true })
+  const { LayerfsTools: Empty } = await import("./index.mjs?startup-empty")
+  await Empty({ directory: mkTmp("magpie-config-") }, {})
+  await new Promise((r) => setTimeout(r, 300))
+  expect(existsSync(join(page, "trajectory-live.js"))).toBe(false)
+  expect(existsSync(join(home, "store"))).toBe(false)
+  // (b) an entry that is no project: the backend's own answer decides, so
+  // the page keeps its sample instead of an empty picture that would hide
+  // real work (finding: existence alone, or a cross-backend guess, is not
+  // enough)
+  writeFileSync(join(home, "projects", "not-a-project.txt"), "x")
+  const { LayerfsTools: Foreign } = await import("./index.mjs?startup-foreign")
+  await Foreign({ directory: mkTmp("magpie-config-") }, {})
+  await new Promise((r) => setTimeout(r, 300))
+  expect(existsSync(join(page, "trajectory-live.js"))).toBe(false)
+})
+
 test("r3 item 2: a development checkout is never swapped — only the install is", async () => {
   // the accident the guard exists for: LayerfsTools() running from a
   // checkout (a .git beside index.mjs) must leave the checkout's page/

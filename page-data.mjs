@@ -6,9 +6,9 @@
 // with the host's context at load — an exported helper would be called as
 // one and fail. index.mjs imports these; the host never scans this file.
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { storeHome } from "./layerfs.mjs"
 
 // The page loads this after the bundled sample and prefers it.
 export const LIVE = "trajectory-live.js"
@@ -16,7 +16,7 @@ export const LIVE = "trajectory-live.js"
 // The data folder: MAGPIE_LAYERFS_DATA_DIR moves it; the default sits
 // beside the store, under ~/.magpie-layerfs.
 export const dataDir = () =>
-  process.env.MAGPIE_LAYERFS_DATA_DIR || join(homedir(), ".magpie-layerfs", "page-data")
+  process.env.MAGPIE_LAYERFS_DATA_DIR || join(storeHome(), "page-data")
 
 // One host lays the swap while others may hold the folder: the holder of
 // a lock file laid within the last 10s is laying it too, so we skip.
