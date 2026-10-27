@@ -229,6 +229,18 @@ MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<layerfs checkout>/api/agent/sdk/s
 Zero runtime dependencies; the arguments are JSON Schema, like the other
 tools packages. MIT.
 
+## Changes in 0.10.1
+
+A load fix for 0.10.0 on the real host. magpie's plugin host takes every
+function the entry module exports for an OpenCode plugin factory
+(`servers()` in `host.js`) and calls it with the host's context at load;
+0.10.0 exported `ensurePageData` from `index.mjs` for its tests, so the
+host called it as a second plugin function and the whole plugin failed to
+load (`join` got the context object where a path was expected). The swap
+now lives in `page-data.mjs`, beside the entry: `index.mjs` imports it,
+the host never scans it, and the entry exports only `LayerfsTools`. No
+behaviour change.
+
 ## Changes in 0.10.0
 
 The page's live channel comes back, out of the plugin's own folder. The

@@ -6,20 +6,22 @@
 //
 // The page's data channel: magpie serves a plugin page's files from the
 // plugin's folder as they sit on disk, so after the calls that change the
-// store the tools rewrite page/trajectory-live.js from backend.trajectory()
-// — the page's real commits, branches, storage and dedup accounting, with
-// the real calling agent on each. See the README's page section.
+// store the tools rewrite trajectory-live.js in the plugin's data folder
+// (page-data.mjs; the installed page/ is a link to it) from
+// backend.trajectory() — the page's real commits, branches, storage and
+// dedup accounting, with the real calling agent on each. See the README's
+// page section.
 //
 // Backends: the real LayerFS through its JavaScript SDK — off by
 // default, on only when the user opts in (the plugin's "native"
 // option, or MAGPIE_LAYERFS_NATIVE=1) with LAYERFS_SDK_PATH set, and
 // always behind a child process — otherwise a local content-addressed
 // store with the same model. See layerfs.mjs and the README.
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { checkBranch, checkInnerPath, checkProject, checkSourceDir, createBackend } from "./layerfs.mjs"
+import { LIVE, dataDir, ensurePageData } from "./page-data.mjs"
 
 const str = (v, name) => {
   if (typeof v !== "string" || !v) throw new Error(`${name} is a non-empty string`)
@@ -41,119 +43,16 @@ const callingAgent = (ctx) => {
 // magpie serves a page's files from the plugin's folder per request, as they
 // sit on disk, so a file the tools keep current IS a data channel: after the
 // calls that change the store, backend.trajectory() is rebuilt and written
-// to page/trajectory-live.js — tmp-then-renamed, so the page never loads a
-// half-written file. The page loads it after the bundled sample and prefers
-// it; an empty store writes an empty live file, and the page shows its
-// honest empty state instead of the demo. The write is debounced and off
+// to trajectory-live.js in the data folder (page-data.mjs) — tmp-then-
+// renamed, so the page never loads a half-written file; the installed page/
+// is a link to that folder. The page loads it after the bundled sample and
+// prefers it; an empty store writes an empty live file, and the page shows
+// its honest empty state instead of the demo. The write is debounced and off
 // the calls' critical path, errors swallowed — the page keeps its last
 // file, the tool calls are untouched. MAGPIE_LAYERFS_PAGE_DIR moves the
 // folder (the tests point it at a scratch dir).
-const LIVE = "trajectory-live.js"
 const LIVE_DEBOUNCE_MS = 1200
 
-// The page's folder is the installed package's page/; the live data lives
-// OUT of it, in the plugin's data directory (the registry review #365,
-// item 2: nothing writes into the installed plugin's own folder — an
-// update replaces that folder, two hosts with one install race on the
-// same file, and an install can be read-only). ensurePageData copies the
-// bundled page files into the data folder once, then points the installed
-// page/ at it — a junction on Windows, a symlink elsewhere — so the
-// host's per-request disk serving reads through it and the tools' live
-// writes land in the data directory. Idempotent: the second call sees the
-// link and leaves it. Every step is safe to fail: the page falls back to
-// the bundled sample and the tools are untouched. MAGPIE_LAYERFS_PAGE_DIR
-// keeps the tests' handle on the folder actually served;
-// MAGPIE_LAYERFS_DATA_DIR moves the data folder (the default sits beside
-// the store, under ~/.magpie-layerfs).
-const dataDir = () =>
-  process.env.MAGPIE_LAYERFS_DATA_DIR || join(homedir(), ".magpie-layerfs", "page-data")
-
-// One host lays the swap while others may hold the folder: the holder of
-// a lock file laid within the last 10s is laying it too, so we skip.
-const ensureLockFresh = (p) => {
-  try { return Date.now() - lstatSync(p).mtimeMs < 10_000 } catch { return false }
-}
-
-export async function ensurePageData(installDir, { swap = true } = {}) {
-  const install = installDir ? join(installDir, "page") : null
-  const data = dataDir()
-  const here = dirname(fileURLToPath(import.meta.url))
-  // The served folder already points at our data dir: done (idempotent).
-  // realpathSync, not readlinkSync: junctions answer with their target
-  // verbatim, and a drive letter's case or a trailing separator would
-  // read as a mismatch and send the seed step into copying the data
-  // folder onto itself.
-  const isLink = (p) => { try { return lstatSync(p).isSymbolicLink() } catch { return false } }
-  const pointsAt = (p, target) => {
-    try { return realpathSync(p) === realpathSync(target) } catch { return false }
-  }
-  if (install && isLink(install)) {
-    if (pointsAt(install, data)) return data
-    // A junction at an old data dir (DATA_DIR moved): re-point it.
-    try {
-      rmSync(install, { force: true })
-      symlinkSync(data, install, "junction")
-      return data
-    } catch { /* fall through: reseed and retry the swap below */ }
-  }
-  // Another host's lock: it may be mid-swap; serve the install's own page.
-  if (ensureLockFresh(join(data, ".ensure-lock"))) return install ?? data
-  mkdirSync(data, { recursive: true })
-  writeFileSync(join(data, ".ensure-lock"), String(Date.now()))
-  try {
-    // Asides a killed host left behind: the page that was mid-swap is
-    // back in the install (its rename is the first step) or gone with
-    // the aside, in which case the seed below re-copies it from the
-    // module's own page/.
-    if (install) {
-      try {
-        for (const a of readdirSync(dirname(install)))
-          if (a.startsWith(".page-aside-")) rmSync(join(dirname(install), a), { recursive: true, force: true })
-      } catch { /* the install's parent may be gone (a fresh install unpacking) */ }
-    }
-    // Seed the data copy from the freshest bundled files: the install's
-    // page/ when it is still a real folder, else this module's own. A
-    // source that resolves into the data folder itself (the served page
-    // is the link already) is skipped: copying the folder onto itself
-    // would truncate the files it reads.
-    const seedFrom = install && !isLink(install) && existsSync(install) ? install
-      : existsSync(join(here, "page")) && !pointsAt(join(here, "page"), data) ? join(here, "page")
-      : null
-    if (seedFrom) {
-      for (const f of readdirSync(seedFrom)) {
-        if (f === LIVE) continue // a previous live file is superseded by the data copy's
-        if (install && pointsAt(join(dirname(install), f), join(data, f))) continue
-        cpSync(join(seedFrom, f), join(data, f), { recursive: true, force: true })
-      }
-    }
-    if (!swap || !install) return data
-    // Swap the install's page/ for the link — or, when the install is
-    // read-only or the link fails, leave the bundled page in place: the
-    // page falls back to the sample, the tools are untouched.
-    if (isLink(install)) return data
-    const aside = mkdtempSync(join(dirname(install), ".page-aside-"))
-    const putBack = () => { try { renameSync(join(aside, "page"), install) } catch { /* both gone: the data copy is still seeded */ } }
-    try {
-      try {
-        renameSync(install, join(aside, "page"))
-        symlinkSync(data, install, "junction")
-        rmSync(aside, { recursive: true, force: true })
-      } catch {
-        // no junction support (or the rename failed): put the bundled page back
-        if (!existsSync(install)) putBack()
-        rmSync(aside, { recursive: true, force: true })
-        return install
-      }
-    } catch {
-      putBack()
-      try { rmSync(aside, { recursive: true, force: true }) } catch { /* the aside may be gone already */ }
-      return install
-    }
-    return data
-  } finally {
-    try { rmSync(join(data, ".ensure-lock"), { force: true }) } catch { /* best effort */ }
-  }
-}
 // The folder the live write lands in: the folder the host actually
 // serves the page from. An install serves the page through the link the
 // swap laid, so its live write lands in the data directory. A bare

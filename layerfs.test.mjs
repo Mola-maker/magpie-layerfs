@@ -877,7 +877,7 @@ test("r3 item 2: ensurePageData points the install's page folder at the data dir
   copyFileSync(join(import.meta.dir, "index.mjs"), join(install, "index.mjs"))
   cpSync(join(import.meta.dir, "page"), join(install, "page"), { recursive: true })
   // run the ensure step the way the host's first LayerfsTools() does
-  const { ensurePageData } = await import("./index.mjs")
+  const { ensurePageData } = await import("./page-data.mjs")
   const served = await ensurePageData(install)
   expect(served).toBe(data)
   // every bundled page file is reachable through the junction, byte-identical

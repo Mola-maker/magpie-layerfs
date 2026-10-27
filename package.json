@@ -7,6 +7,7 @@
     "index.mjs",
     "layerfs.mjs",
     "native-worker.mjs",
+    "page-data.mjs",
     "page",
     "README.md"
   ],
@@ -46,5 +47,5 @@
     "url": "git+https://github.com/Mola-maker/magpie-layerfs.git"
   },
   "type": "module",
-  "version": "0.10.0"
+  "version": "0.10.1"
 }
