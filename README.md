@@ -229,6 +229,46 @@ MAGPIE_LAYERFS_NATIVE_TEST=1 LAYERFS_SDK_PATH=<layerfs checkout>/api/agent/sdk/s
 Zero runtime dependencies; the arguments are JSON Schema, like the other
 tools packages. MIT.
 
+## Changes in 0.10.0
+
+The page's live channel comes back, out of the plugin's own folder. The
+registry's 0.9.0 (magpie-community/plugins #365) carried the review: the
+tools no longer write into the installed package's folder — an update
+replaces that folder, two hosts with one install race on the same file,
+and an install can be read-only — so its page kept only the bundled
+sample, and every desktop that auto-updated lost the live trajectory
+(`plugin-updates.json` moved installs from 0.8.0 to the registry's 0.9.0
+on 2026-10-26). This version answers both sides at once:
+
+- **The live data lives in the plugin's data directory** —
+  `~/.magpie-layerfs/page-data/` (move it with
+  `MAGPIE_LAYERFS_DATA_DIR`), beside the store, never inside the
+  install. On the first `LayerfsTools()` of a host start, an idempotent
+  `ensurePageData` copies the bundled page files there once and points
+  the installed package's `page/` at that folder — a junction on
+  Windows, a symlink elsewhere — so the host's per-request disk
+  serving reads through it; the review's `inside()` guard resolves
+  symlinks on both ends and passes the layout. A development checkout
+  (a `.git` beside `index.mjs`) is never swapped, only seeded;
+  `MAGPIE_LAYERFS_INSTALL_DIR` overrides the install for the tests.
+- **The tools write the live file into the data folder** — the same
+  debounced, tmp-then-renamed `trajectory-live.js` as 0.8.0, landing in
+  the data directory instead of the package. The write needs no swap:
+  a read-only install still gets the data folder current, and the page
+  follows the next time the swap can be laid.
+- **An Agent activity table.** The page now lists every recorded tool
+  call — the calling agent, the tool, the project, the branch and the
+  time, newest last — under the replay: each agent's provision, fork,
+  checkpoint and publish visible per round, answering with what each
+  one did to which worktree. The bundled sample carries no events, so
+  the section hides itself there; the locales (en, zh, zh-TW, ja) all
+  carry the new strings.
+
+`MAGPIE_LAYERFS_PAGE_DIR` still moves the folder the tests point at and
+keeps its old meaning. An install whose page folder cannot be swapped
+(read-only, a filesystem without junctions) falls back to the bundled
+sample, silently; the tools and the data folder are untouched.
+
 ## Changes in 0.9.0
 
 The native backend speaks LayerFS 1.1.0. That release split the SDK

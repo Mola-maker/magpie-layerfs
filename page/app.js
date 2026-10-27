@@ -45,11 +45,43 @@
   const data = globalThis.LayerfsTrajectory;
   const projects = (data && data.projects || []).filter((p) => p.branches.some((b) => b.commits.length));
   if (!projects.length) {
-    $("stage").hidden = true; $("controls").hidden = true; $("stats").hidden = true;
+    $("stage").hidden = true; $("controls").hidden = true; $("stats").hidden = true; $("agents").hidden = true;
     $("empty").hidden = false; $("empty").textContent = t.noData;
     return;
   }
   $("stamp").textContent = data.sample ? t.sample : `${t.recorded} ${String(data.generatedAt || "").replace("T", " ").slice(0, 19)} · ${data.backend || ""}`;
+
+  // Agent activity: every recorded tool call, newest last, each naming
+  // the calling agent, the tool, the project, the branch and when. The
+  // events arrive in the live trajectory (the tools keep them current
+  // after every mutating call); the bundled sample carries none, so the
+  // section hides itself there.
+  {
+    const events = (data.events || []).slice(-40);
+    const section = $("agents"), rows = $("agentRows"), emptyMsg = $("agentsEmpty");
+    section.hidden = false;
+    if (!events.length) {
+      $("agentTable").hidden = true;
+      emptyMsg.hidden = false;
+      emptyMsg.textContent = t.agentsEmpty;
+    } else {
+      $("agentTable").hidden = false;
+      emptyMsg.hidden = true;
+      for (const e of events) {
+        const tr = document.createElement("tr");
+        const cells = [
+          e.agent || "—", e.kind || "—", e.project || "—", e.branch || "—",
+          String(e.t || "").replace("T", " ").slice(0, 19),
+        ];
+        for (const c of cells) {
+          const td = document.createElement("td");
+          td.textContent = c;
+          tr.append(td);
+        }
+        rows.append(tr);
+      }
+    }
+  }
 
   // the project picker: a magpie-style menu (a button and a listbox),
   // not a native <select> — magpie's own UI never uses one

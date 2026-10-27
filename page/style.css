@@ -176,3 +176,13 @@ header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; borde
 @media (prefers-reduced-motion: reduce) {
   #play { transition: none; }
 }
+
+/* Agent activity: the per-agent tool-call table under the replay */
+section.agents { margin-top: 22px; }
+section.agents h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; opacity: .75; }
+.agent-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.agent-table th { text-align: left; font-weight: 600; opacity: .6; padding: 4px 10px; border-bottom: 1px solid var(--magpie-border, rgba(128,128,128,.25)); }
+.agent-table td { padding: 5px 10px; border-bottom: 1px solid var(--magpie-border, rgba(128,128,128,.15)); font-variant-numeric: tabular-nums; }
+.agent-table tr:last-child td { border-bottom: none; }
+.agent-table td:first-child { font-weight: 600; }
+.agents-empty { opacity: .6; font-size: 12.5px; margin: 0; }

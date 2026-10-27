@@ -15,6 +15,8 @@
       live: "live", layers: "layers", history: "HISTORY", stats: "store.stats · read-only",
       dedupe: "dedupe", graft: "published", twig: "bare twig",
       checkpointsK: "Checkpoints", branchesK: "Branches",
+      agentsK: "Agent activity", agentsEmpty: "No tool calls yet. Each agent's provision, fork, checkpoint and publish lands here as it happens.",
+      agentCol: "Agent", toolCol: "Tool", projectCol: "Project", branchCol: "Branch", whenCol: "When",
     },
     zh: {
       title: "LayerFS 轨迹", replay: "回放", pause: "暂停",
@@ -26,6 +28,8 @@
       live: "条存活分支", layers: "层", history: "HISTORY", stats: "store.stats · 只读",
       dedupe: "去重", graft: "已发布", twig: "未发布的枝条",
       checkpointsK: "检查点", branchesK: "分支",
+      agentsK: "Agent 活动", agentsEmpty: "还没有工具调用。每个 agent 的 provision、fork、checkpoint 和 publish 会实时落在这里。",
+      agentCol: "Agent", toolCol: "工具", projectCol: "项目", branchCol: "分支", whenCol: "时间",
     },
     "zh-TW": {
       title: "LayerFS 軌跡", replay: "重播", pause: "暫停",
@@ -37,6 +41,8 @@
       live: "條存活分支", layers: "層", history: "HISTORY", stats: "store.stats · 唯讀",
       dedupe: "去重", graft: "已發布", twig: "未發布的枝條",
       checkpointsK: "檢查點", branchesK: "分支",
+      agentsK: "Agent 活動", agentsEmpty: "還沒有工具呼叫。每個 agent 的 provision、fork、checkpoint 和 publish 會即時落在這裡。",
+      agentCol: "Agent", toolCol: "工具", projectCol: "專案", branchCol: "分支", whenCol: "時間",
     },
     ja: {
       title: "LayerFS の軌跡", replay: "再生", pause: "一時停止",
@@ -48,6 +54,8 @@
       live: "本の生存ブランチ", layers: "レイヤー", history: "HISTORY", stats: "store.stats · 読み取り専用",
       dedupe: "重複排除", graft: "公開済み", twig: "未公開の枝",
       checkpointsK: "チェックポイント", branchesK: "ブランチ",
+      agentsK: "エージェントの活動", agentsEmpty: "まだツール呼び出しはありません。各エージェントの provision、fork、checkpoint、publish は随時ここに記録されます。",
+      agentCol: "エージェント", toolCol: "ツール", projectCol: "プロジェクト", branchCol: "ブランチ", whenCol: "時刻",
     },
   };
 

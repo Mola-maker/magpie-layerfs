@@ -3,3 +3,10 @@ node_modules/
 bench/results/
 *.log
 page/trajectory-live.js*
+.omc/
+*.tgz
+.deploy-*.ps1
+.e2e*
+layerfs-src/
+magpie-src/
+page/trajectory-live.js*
