@@ -1,4 +1,15 @@
+<img src="icon.svg" width="128" height="128" alt="LayerFS for Magpie icon">
+
 # LayerFS for Magpie
+
+**LayerFS workspaces for every Magpie agent: one durable, deduplicated history behind stable filesystem paths — fork a branch for a parallel agent with 0 bytes copied, checkpoint only what changed.**
+
+**给每个 Magpie agent 的 LayerFS 工作区：一份可去重的持久历史，路径稳定——并行 agent 开分支不复制任何文件字节，存检查点只写变化的部分。**
+
+```sh
+magpie plugin add @magpie-community/tools-layerfs
+magpie plugin            # lists layerfs_provision, layerfs_checkpoint, ...
+```
 
 [LayerFS](https://github.com/Ephemeral-AI-Lab/layerfs) workspaces for every
 agent [magpie](https://usemagpie.ai) connects: instead of each agent copying
@@ -11,11 +22,6 @@ committed.
 给每个 agent 的 LayerFS 工作区：多个 agent 共享一份可去重的持久历史，而不是
 各自复制整棵项目树。给并行 agent 开分支不复制任何文件字节；存检查点只写
 变化的部分；路径稳定，任何 agent 都能定位、读取并接续其他 agent 的提交。
-
-```sh
-magpie plugin add @magpie-community/tools-layerfs
-magpie plugin            # lists layerfs_provision, layerfs_checkpoint, ...
-```
 
 ## Tools
 

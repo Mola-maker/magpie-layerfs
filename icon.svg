@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- tools-layerfs: LayerFS workspaces. Leaf-green tile, white leaf in
+       the shape of LayerFS's own leaf glyph (page/view.js LEAF_GLYPH,
+       scaled x2), with a forked vein inside it: the branch splitting,
+       the trajectory page's bough motif. Flat shapes only; the leaf
+       silhouette carries recognition down to 16 px. -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#16a34a"/>
+  <path d="M32 11 C48 19 52 39 32 53 C12 39 16 19 32 11 Z" fill="#ffffff"/>
+  <path d="M32 50 L32 32 M32 32 C28 27 25 25 22 21 M32 32 C36 27 39 25 42 21" fill="none" stroke="#16a34a" stroke-width="3" stroke-linecap="round"/>
+</svg>
